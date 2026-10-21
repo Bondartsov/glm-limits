@@ -1,5 +1,6 @@
 // GLM Limits — popup.js
 const VIEW_MODES = ["popup", "window", "compact"];
+const PLATFORMS = ["auto", "cn", "intl"];
 
 const I18N = {
   en: {
@@ -12,14 +13,17 @@ const I18N = {
     apiKey: "API Key",
     apiKeyHint: "Your GLM Coding Plan API key. Stored locally, sent only to the quota endpoint.",
     platform: "Platform",
+    platformAuto: "Auto",
     platformCn: "China · open.bigmodel.cn",
     platformIntl: "International · api.z.ai",
-    platformHint: "Choose the site that issued your key — bigmodel.cn and z.ai keys are not interchangeable.",
+    platformHint: "Auto detects the site from the key shape — bigmodel.cn and z.ai keys are not interchangeable.",
     interval: "Refresh interval (sec)", viewMode: "View mode",
     viewPopup: "Popup", viewWindow: "Window", viewCompact: "Compact",
     language: "Language", theme: "Theme",
     themeLight: "Light", themeDark: "Dark",
-    showMcp: "Show MCP usage", save: "Save", reset: "Reset",
+    showMcp: "Show MCP usage",
+    notifyLabel: "Notify at 80/90% of session",
+    save: "Save", reset: "Reset",
     plan: "Plan",
     utilSpent: "used",
     sessionLeft: "Left · session (5h)", weeklyLeft: "Left · weekly", mcpLeft: "Left · MCP",
@@ -37,14 +41,17 @@ const I18N = {
     apiKey: "API-ключ",
     apiKeyHint: "Ваш API-ключ GLM Coding Plan. Хранится локально, уходит только на endpoint квот.",
     platform: "Платформа",
+    platformAuto: "Авто",
     platformCn: "Китай · open.bigmodel.cn",
     platformIntl: "Международный · api.z.ai",
-    platformHint: "Площадка, на которой создан ключ, — ключи bigmodel.cn и z.ai не взаимозаменяемы.",
+    platformHint: "«Авто» определяет площадку по виду ключа — ключи bigmodel.cn и z.ai не взаимозаменяемы.",
     interval: "Интервал обновления (сек)", viewMode: "Режим отображения",
     viewPopup: "Popup", viewWindow: "Окно", viewCompact: "Компактный",
     language: "Язык", theme: "Тема",
     themeLight: "Светлая", themeDark: "Тёмная",
-    showMcp: "Показывать MCP", save: "Сохранить", reset: "Сбросить",
+    showMcp: "Показывать MCP",
+    notifyLabel: "Уведомлять при 80/90% сессии",
+    save: "Сохранить", reset: "Сбросить",
     plan: "Тариф",
     utilSpent: "израсходовано",
     sessionLeft: "Осталось · сессия (5ч)", weeklyLeft: "Осталось · неделя", mcpLeft: "Осталось · MCP",
@@ -58,6 +65,7 @@ let currentLang = "en";
 let currentSettings = {};
 let latestData = null;
 let tickTimer = null;
+let historyData = [];
 
 // ── Helpers ──────────────────────────────────────────────
 function t(key) {
@@ -68,6 +76,10 @@ function $(id) { return document.getElementById(id); }
 
 function normalizeViewMode(v) {
   return VIEW_MODES.includes(v) ? v : "popup";
+}
+
+function normalizePlatform(v) {
+  return PLATFORMS.includes(v) ? v : "auto";
 }
 
 // Legacy stored value "clay" maps to "light".
@@ -114,6 +126,48 @@ function fmtAt(epochMs) {
   return dayName + " " + timeStr;
 }
 
+// ── Sparkline ────────────────────────────────────────────
+async function loadHistory() {
+  try {
+    const r = await chrome.storage.local.get("history");
+    historyData = Array.isArray(r.history) ? r.history : [];
+  } catch (e) {
+    historyData = [];
+  }
+}
+
+// History points of one window ("s" or "w") since its start.
+// Window length is derived from the reset time (5h session, 7d week).
+function windowSeries(kind, resetsAt) {
+  const len = kind === "s" ? 5 * 3600e3 : 7 * 24 * 3600e3;
+  const startTs = resetsAt ? resetsAt - len : Date.now() - len;
+  return historyData
+    .filter(p => p && p.ts >= startTs && typeof p[kind] === "number")
+    .map(p => ({ ts: p.ts, v: p[kind] }));
+}
+
+function renderSparkline(el, pts) {
+  if (!el) return;
+  const clean = (pts || []).filter(p => p && typeof p.v === "number");
+  if (clean.length < 2) { el.style.display = "none"; return; }
+  el.style.display = "block";
+  const W = 328, H = 26, PAD = 2;
+  const t0 = clean[0].ts, t1 = clean[clean.length - 1].ts;
+  const span = Math.max(t1 - t0, 1);
+  const x = (ts) => PAD + (ts - t0) / span * (W - 2 * PAD);
+  const y = (v) => H - PAD - (Math.max(0, Math.min(100, v)) / 100) * (H - 2 * PAD);
+  let d = "M" + x(clean[0].ts).toFixed(1) + " " + y(clean[0].v).toFixed(1);
+  for (let i = 1; i < clean.length; i++) {
+    d += " L" + x(clean[i].ts).toFixed(1) + " " + y(clean[i].v).toFixed(1);
+  }
+  const area = d + " L" + x(t1).toFixed(1) + " " + (H - PAD) + " L" + x(t0).toFixed(1) + " " + (H - PAD) + " Z";
+  const color = levelColor(clean[clean.length - 1].v);
+  // CSS vars in levelColor() only work via style=, not presentation attributes.
+  el.innerHTML =
+    '<path d="' + area + '" style="fill:' + color + ';stroke:none" opacity="0.12"></path>' +
+    '<path d="' + d + '" style="fill:none;stroke:' + color + '" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round"></path>';
+}
+
 // ── Rendering ────────────────────────────────────────────
 function setStatus(kind, text) {
   const dot = document.querySelector("#status .dot");
@@ -122,7 +176,7 @@ function setStatus(kind, text) {
   if (txt) txt.textContent = text;
 }
 
-function showMetric(elId, pctId, barId, resetId, data) {
+function showMetric(elId, pctId, barId, resetId, data, sparkId, series) {
   const el = $(elId);
   if (!data || data == null || typeof data !== "object") {
     el.style.display = "none";
@@ -140,6 +194,7 @@ function showMetric(elId, pctId, barId, resetId, data) {
     pct.textContent = "—";
     bar.style.width = "0%";
     reset.textContent = "—";
+    if (sparkId) renderSparkline($(sparkId), []);
     return;
   }
   pct.textContent = remaining.toFixed(0);
@@ -150,6 +205,8 @@ function showMetric(elId, pctId, barId, resetId, data) {
   const annoId = elId.replace("metric", "").toLowerCase() + "Anno";
   const anno = $(annoId);
   if (anno) anno.textContent = t("utilSpent") + " " + used.toFixed(0) + "%";
+  // Usage sparkline — drawn from the local history when there are enough points.
+  if (sparkId) renderSparkline($(sparkId), series || []);
   // Reset countdown — nextResetTime is epoch ms.
   const resetMs = data.resetsAt ? new Date(data.resetsAt).getTime() : null;
   if (resetMs && resetMs > 0) {
@@ -213,8 +270,12 @@ function render(data) {
   } else {
     $("compactView").style.display = "none";
     $("fullView").style.display = "";
-    showMetric("metricSession", "sessionPct", "sessionBar", "sessionReset", data.s);
-    showMetric("metricWeekly", "weeklyPct", "weeklyBar", "weeklyReset", data.w);
+    const sResetsAt = (data.s && data.s.resetsAt) ? new Date(data.s.resetsAt).getTime() : null;
+    const wResetsAt = (data.w && data.w.resetsAt) ? new Date(data.w.resetsAt).getTime() : null;
+    showMetric("metricSession", "sessionPct", "sessionBar", "sessionReset", data.s,
+      "sessionSpark", windowSeries("s", sResetsAt));
+    showMetric("metricWeekly", "weeklyPct", "weeklyBar", "weeklyReset", data.w,
+      "weeklySpark", windowSeries("w", wResetsAt));
     if (currentSettings.showMcp && data.mcp) {
       showMetric("metricMcp", "mcpPct", "mcpBar", "mcpReset", data.mcp);
     } else {
@@ -247,16 +308,17 @@ function applyTheme(theme) {
 async function loadSettings() {
   const r = await chrome.storage.local.get([
     "apiKey", "platform", "intervalSec", "viewMode",
-    "lang", "theme", "showMcp"
+    "lang", "theme", "showMcp", "notify"
   ]);
   currentSettings = {
     apiKey: r.apiKey || "",
-    platform: r.platform || "cn",
+    platform: normalizePlatform(r.platform),
     intervalSec: r.intervalSec || 120,
     viewMode: normalizeViewMode(r.viewMode),
     lang: r.lang || "en",
     theme: normalizeTheme(r.theme),
-    showMcp: r.showMcp || false
+    showMcp: r.showMcp || false,
+    notify: r.notify !== false
   };
   currentLang = currentSettings.lang;
 
@@ -267,6 +329,7 @@ async function loadSettings() {
   $("langSelect").value = currentSettings.lang;
   $("themeSelect").value = currentSettings.theme;
   $("showMcpCheck").checked = currentSettings.showMcp;
+  $("notifyCheck").checked = currentSettings.notify;
 
   applyI18n();
   applyTheme(currentSettings.theme);
@@ -275,12 +338,13 @@ async function loadSettings() {
 async function saveSettings() {
   currentSettings = {
     apiKey: $("apiKeyInput").value.trim(),
-    platform: $("platformSelect").value,
+    platform: normalizePlatform($("platformSelect").value),
     intervalSec: parseInt($("intervalInput").value) || 120,
     viewMode: normalizeViewMode($("viewModeSelect").value),
     lang: $("langSelect").value,
     theme: $("themeSelect").value,
-    showMcp: $("showMcpCheck").checked
+    showMcp: $("showMcpCheck").checked,
+    notify: $("notifyCheck").checked
   };
   await chrome.storage.local.set(currentSettings);
   currentLang = currentSettings.lang;
@@ -295,7 +359,7 @@ async function saveSettings() {
 async function resetSettings() {
   await chrome.storage.local.remove([
     "apiKey", "platform", "intervalSec", "viewMode",
-    "lang", "theme", "showMcp"
+    "lang", "theme", "showMcp", "notify"
   ]);
   await loadSettings();
   // Background keeps its own alarm/popup state — re-apply defaults there too.
@@ -307,12 +371,10 @@ async function resetSettings() {
 async function poll() {
   try {
     const r = await chrome.runtime.sendMessage({ type: "poll" });
-    if (r && r.ok) {
-      render(r);
-    } else {
-      render({ ok: false });
-    }
+    await loadHistory();
+    render(r && r.ok ? r : { ok: false });
   } catch (e) {
+    await loadHistory();
     render({ ok: false });
   }
 }
@@ -394,6 +456,7 @@ function startTick() {
 // ── Init ──────────────────────────────────────────────────
 async function init() {
   await loadSettings();
+  await loadHistory();
   // Fast path: show cached latest immediately (background may have polled via alarm).
   const cached = await chrome.storage.local.get("latest");
   if (cached.latest) render(cached.latest);

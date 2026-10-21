@@ -61,6 +61,7 @@
           </div>
           <div class="metric-anno" id="sessionAnno"></div>
           <div class="bar-track"><div class="bar-fill" id="sessionBar"></div></div>
+          <svg class="spark" id="sessionSpark" viewBox="0 0 328 26" preserveAspectRatio="none" style="display:none"></svg>
           <div class="reset" id="sessionReset"></div>
         </div>
 
@@ -72,6 +73,7 @@
           </div>
           <div class="metric-anno" id="weeklyAnno"></div>
           <div class="bar-track"><div class="bar-fill" id="weeklyBar"></div></div>
+          <svg class="spark" id="weeklySpark" viewBox="0 0 328 26" preserveAspectRatio="none" style="display:none"></svg>
           <div class="reset" id="weeklyReset"></div>
         </div>
 
@@ -128,10 +130,11 @@
       <div class="field">
         <label data-i18n="platform">Platform</label>
         <select id="platformSelect">
+          <option value="auto" data-i18n="platformAuto">Auto</option>
           <option value="cn" data-i18n="platformCn">China · open.bigmodel.cn</option>
           <option value="intl" data-i18n="platformIntl">International · api.z.ai</option>
         </select>
-        <small data-i18n="platformHint">Choose the site that issued your key.</small>
+        <small data-i18n="platformHint">Auto detects the site from your key.</small>
       </div>
 
       <div class="field">
@@ -167,6 +170,11 @@
       <div class="field">
         <label data-i18n="showMcp">Show MCP usage</label>
         <input type="checkbox" id="showMcpCheck">
+      </div>
+
+      <div class="field">
+        <label data-i18n="notifyLabel">Notify at 80/90% of session</label>
+        <input type="checkbox" id="notifyCheck">
       </div>
 
       <div class="actions-row">

@@ -1,21 +1,38 @@
 // GLM Limits — background service worker.
-// Polls your GLM Coding Plan quota (raw API key, no Bearer), caches it for the popup.
-// Settings: poll interval + view mode (toolbar popup vs separate window).
+// Polls your GLM Coding Plan quota (raw API key, no Bearer), caches it for the popup,
+// keeps a usage history for the sparkline and fires one-shot 80/90% session notifications.
+// Settings: platform (auto-detected from the key), poll interval, view mode, notifications.
 
-// Must match popup.js defaults (intervalSec) and VIEW_MODES whitelist.
-const DEFAULTS = { intervalSec: 120, viewMode: "popup", platform: "cn", apiKey: "" };
+const DEFAULTS = { intervalSec: 120, viewMode: "popup", platform: "auto", notify: true };
 const VIEW_MODES = ["popup", "window", "compact"];
+const PLATFORMS = ["auto", "cn", "intl"];
+
+// Host per platform. cn = open.bigmodel.cn, intl = api.z.ai.
+const HOSTS = { cn: "https://open.bigmodel.cn", intl: "https://api.z.ai" };
+const QUOTA_PATH = "/api/monitor/usage/quota/limit";
+
+// Sparkline history: one point per 5 minutes is enough, capped to stay small.
+const HISTORY_STEP_MS = 5 * 60 * 1000;
+const HISTORY_MAX_POINTS = 800;
+
+// Session usage thresholds for one-shot notifications, highest first.
+const NOTIFY_THRESHOLDS = [
+  { at: 90, flag: "s90" },
+  { at: 80, flag: "s80" },
+];
 
 async function getSettings() {
   // Flat keys — must match popup.js loadSettings/saveSettings.
   const r = await chrome.storage.local.get([
-    "apiKey", "platform", "intervalSec", "viewMode"
+    "apiKey", "platform", "intervalSec", "viewMode", "lang", "notify"
   ]);
   return {
     apiKey: r.apiKey || DEFAULTS.apiKey,
-    platform: r.platform || DEFAULTS.platform,
+    platform: PLATFORMS.includes(r.platform) ? r.platform : DEFAULTS.platform,
     intervalSec: r.intervalSec || DEFAULTS.intervalSec,
-    viewMode: r.viewMode || DEFAULTS.viewMode,
+    viewMode: VIEW_MODES.includes(r.viewMode) ? r.viewMode : DEFAULTS.viewMode,
+    lang: r.lang || "en",
+    notify: r.notify !== false,
   };
 }
 
@@ -32,6 +49,18 @@ function openWindow() {
   chrome.windows.create({ url: "popup.html?win=1", type: "popup", width: 360, height: 620 });
 }
 
+// Guess the platform from the key shape:
+//  - bigmodel.cn keys use the "id.secret" form and contain a dot;
+//  - z.ai keys are opaque strings (may carry a "zai" prefix).
+//  Unknown shape → international.
+function detectPlatform(key) {
+  const k = (key || "").trim();
+  if (!k) return "cn";
+  if (/^zai[_-]/i.test(k)) return "intl";
+  if (k.includes(".")) return "cn";
+  return "intl";
+}
+
 async function getJSON(url, apiKey) {
   const r = await fetch(url, {
     headers: {
@@ -45,10 +74,6 @@ async function getJSON(url, apiKey) {
   return r.json();
 }
 
-// Host per platform. cn = open.bigmodel.cn, intl = api.z.ai.
-const HOSTS = { cn: "https://open.bigmodel.cn", intl: "https://api.z.ai" };
-const QUOTA_PATH = "/api/monitor/usage/quota/limit";
-
 // Parse one limit entry into { utilization (0-100), resetsAt (ISO) }.
 // GLM reports percentage as "used" (e.g. 16.0 = 16% used).
 function normalizeWindow(item) {
@@ -61,12 +86,6 @@ function normalizeWindow(item) {
   return { utilization: Math.min(Math.max(pct, 0), 100), resetsAt };
 }
 
-// Convert epoch ms (Singapore GMT+8 reset clocks) to a local ISO string.
-function msToIso(ms) {
-  if (!ms || Number(ms) <= 0) return null;
-  return new Date(Number(ms)).toISOString();
-}
-
 async function poll() {
   try {
     const st = await getSettings();
@@ -74,8 +93,11 @@ async function poll() {
       await chrome.storage.local.set({ latest: { ok: false, error: "No API key. Set it in settings.", ts: Date.now() } });
       throw new Error("no api key");
     }
-    const host = HOSTS[st.platform] || HOSTS.cn;
-    const body = await getJSON(host + QUOTA_PATH, st.apiKey.trim());
+    // Resolve "auto" (and any stale stored value) into a concrete platform.
+    const platform = st.platform === "auto" || !HOSTS[st.platform]
+      ? detectPlatform(st.apiKey)
+      : st.platform;
+    const body = await getJSON(HOSTS[platform] + QUOTA_PATH, st.apiKey.trim());
 
     const data = body && body.data;
     const limits = (data && Array.isArray(data.limits)) ? data.limits : [];
@@ -109,6 +131,12 @@ async function poll() {
       }
     }
 
+    await appendHistory(
+      fiveHour ? fiveHour.utilization : null,
+      sevenDay ? sevenDay.utilization : null
+    );
+    await maybeNotify(st, fiveHour);
+
     // Store full window objects — popup reads { utilization, resetsAt }.
     const latest = {
       ok: true,
@@ -116,7 +144,7 @@ async function poll() {
       w: sevenDay || null,
       mcp: mcp || null,
       plan: (data && data.level) || null,
-      platform: st.platform,
+      platform,   // resolved platform — footer shows the host actually used
       ts: Date.now(),
       // Raw response for debugging (field names / values as the API returns them).
       raw: (data && Array.isArray(data.limits)) ? data.limits : null,
@@ -127,6 +155,64 @@ async function poll() {
     await chrome.storage.local.set({ latest: { ok: false, error: String(e), ts: Date.now() } });
     throw e;
   }
+}
+
+// Sparkline history points { ts, s, w } — utilization values in %.
+// Newest point is refreshed in place until it is HISTORY_STEP_MS old,
+// so a 2-minute poll interval does not inflate storage.
+async function appendHistory(sUtil, wUtil) {
+  try {
+    const stg = await chrome.storage.local.get("history");
+    const hist = Array.isArray(stg.history) ? stg.history : [];
+    const now = Date.now();
+    const last = hist[hist.length - 1];
+    if (last && now - last.ts < HISTORY_STEP_MS) {
+      last.s = sUtil;
+      last.w = wUtil;
+    } else {
+      hist.push({ ts: now, s: sUtil, w: wUtil });
+    }
+    while (hist.length > HISTORY_MAX_POINTS) hist.shift();
+    await chrome.storage.local.set({ history: hist });
+  } catch (e) {}
+}
+
+// One-shot notifications when session usage crosses 80% / 90%.
+// Flags are scoped to the window (resetsAt) and re-armed only below 70%,
+// so hovering around a threshold does not re-notify.
+async function maybeNotify(st, fiveHour) {
+  if (!st.notify || !fiveHour || typeof fiveHour.utilization !== "number") return;
+  const used = fiveHour.utilization;
+  const winKey = fiveHour.resetsAt || "unknown";
+  const stg = await chrome.storage.local.get("notifState");
+  let ns = stg.notifState;
+  if (!ns || ns.winKey !== winKey) ns = { winKey, s80: false, s90: false };
+  if (used < 70) { ns.s80 = false; ns.s90 = false; }
+  for (const th of NOTIFY_THRESHOLDS) {
+    if (used >= th.at && !ns[th.flag]) {
+      ns[th.flag] = true;
+      if (th.flag === "s90") ns.s80 = true; // jumping straight past 80% covers both
+      fireNotification(st.lang, used, th.at);
+      break; // at most one notification per poll
+    }
+  }
+  await chrome.storage.local.set({ notifState: ns });
+}
+
+function fireNotification(lang, used, threshold) {
+  const ru = lang === "ru";
+  const remaining = Math.max(0, Math.round(100 - used));
+  const message = ru
+    ? "Сессия израсходована на " + Math.round(used) + "%. До сброса осталось " + remaining + "%."
+    : "Session is " + Math.round(used) + "% used. " + remaining + "% left before reset.";
+  try {
+    chrome.notifications.create({
+      type: "basic",
+      iconUrl: "icons/icon128.png",
+      title: "GLM Limits — " + threshold + "%",
+      message,
+    });
+  } catch (e) {}
 }
 
 chrome.runtime.onInstalled.addListener(() => { applySettings(); poll().catch(() => {}); });

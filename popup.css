@@ -158,6 +158,14 @@ body {
   transition: width 0.5s ease;
 }
 
+/* Usage sparkline */
+.spark {
+  display: none;
+  width: 100%;
+  height: 26px;
+  margin-top: 8px;
+}
+
 .reset {
   font-size: 11.5px;
   color: var(--text-muted);
