@@ -1,4 +1,4 @@
-// GLM Mochi Limits — background service worker.
+// GLM Limits — background service worker.
 // Polls your GLM Coding Plan quota (raw API key, no Bearer), caches it for the popup.
 // Settings: poll interval + view mode (toolbar popup vs separate window).
 
@@ -29,7 +29,7 @@ async function applySettings() {
 
 // Same size as popout() in popup.js so both entry points look identical.
 function openWindow() {
-  chrome.windows.create({ url: "popup.html?win=1", type: "popup", width: 420, height: 650 });
+  chrome.windows.create({ url: "popup.html?win=1", type: "popup", width: 360, height: 620 });
 }
 
 async function getJSON(url, apiKey) {

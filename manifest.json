@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "GLM Mochi — GLM Limits",
-  "version": "0.1.0",
-  "description": "Show your GLM Coding Plan session (5h) and weekly usage at a glance.",
+  "name": "GLM Limits",
+  "version": "0.2.0",
+  "description": "Остаток лимитов GLM Coding Plan: 5-часовая сессия и неделя — одним взглядом.",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
@@ -15,7 +15,7 @@
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "GLM Mochi Limits",
+    "default_title": "GLM Limits",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",

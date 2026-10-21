@@ -1,51 +1,55 @@
-// GLM Mochi — popup.js
+// GLM Limits — popup.js
 const VIEW_MODES = ["popup", "window", "compact"];
 
 const I18N = {
   en: {
-    brand: "GLM Mochi", refresh: "Refresh", compact: "Compact",
-    pin: "Pin on top", popout: "Pop out", settings: "Settings",
+    brand: "GLM Limits",
+    refresh: "Refresh", compact: "Compact view", pin: "Pin on top",
+    popout: "Open in window", settings: "Settings",
     statusOffline: "Offline", statusOnline: "Online",
     statusError: "Error", loading: "Loading…",
     session: "Session (5h)", weekly: "Weekly", mcp: "MCP",
     apiKey: "API Key",
-    apiKeyHint: "Your GLM Coding Plan API key. Never shared.",
-    platform: "Platform", platformCn: "China (open.bigmodel.cn)",
-    platformIntl: "International (api.z.ai)",
+    apiKeyHint: "Your GLM Coding Plan API key. Stored locally, sent only to the quota endpoint.",
+    platform: "Platform",
+    platformCn: "China · open.bigmodel.cn",
+    platformIntl: "International · api.z.ai",
+    platformHint: "Choose the site that issued your key — bigmodel.cn and z.ai keys are not interchangeable.",
     interval: "Refresh interval (sec)", viewMode: "View mode",
     viewPopup: "Popup", viewWindow: "Window", viewCompact: "Compact",
     language: "Language", theme: "Theme",
-    themeClay: "Clay", themeDark: "Dark",
+    themeLight: "Light", themeDark: "Dark",
     showMcp: "Show MCP usage", save: "Save", reset: "Reset",
-    plan: "Plan", noData: "No data yet",
+    plan: "Plan",
     utilSpent: "used",
     sessionLeft: "Left · session (5h)", weeklyLeft: "Left · weekly", mcpLeft: "Left · MCP",
-    footWhat: "Number", footWhatVal: "remaining", footWhen: "Resets", footSource: "Source",
+    footWhen: "Resets", footSource: "Source",
     today: "Today HH:MM", tomorrow: "Tomorrow HH:MM",
-    day: "Day HH:MM",
     resetNow: "Resets now"
   },
   ru: {
-    brand: "GLM Mochi", refresh: "Обновить", compact: "Компакт",
-    pin: "Закрепить", popout: "Открыть отдельно", settings: "Настройки",
+    brand: "GLM Limits",
+    refresh: "Обновить", compact: "Компактный вид", pin: "Закрепить поверх окон",
+    popout: "Открыть в окне", settings: "Настройки",
     statusOffline: "Нет связи", statusOnline: "Онлайн",
     statusError: "Ошибка", loading: "Загрузка…",
     session: "Сессия (5ч)", weekly: "Неделя", mcp: "MCP",
     apiKey: "API-ключ",
-    apiKeyHint: "Ваш GLM Coding Plan API-ключ. Никому не передавайте.",
-    platform: "Платформа", platformCn: "Китай (open.bigmodel.cn)",
-    platformIntl: "Международный (api.z.ai)",
+    apiKeyHint: "Ваш API-ключ GLM Coding Plan. Хранится локально, уходит только на endpoint квот.",
+    platform: "Платформа",
+    platformCn: "Китай · open.bigmodel.cn",
+    platformIntl: "Международный · api.z.ai",
+    platformHint: "Площадка, на которой создан ключ, — ключи bigmodel.cn и z.ai не взаимозаменяемы.",
     interval: "Интервал обновления (сек)", viewMode: "Режим отображения",
-    viewPopup: "Всплывающий", viewWindow: "Окно", viewCompact: "Компакт",
+    viewPopup: "Popup", viewWindow: "Окно", viewCompact: "Компактный",
     language: "Язык", theme: "Тема",
-    themeClay: "Глина", themeDark: "Тёмная",
+    themeLight: "Светлая", themeDark: "Тёмная",
     showMcp: "Показывать MCP", save: "Сохранить", reset: "Сбросить",
-    plan: "Тариф", noData: "Нет данных",
+    plan: "Тариф",
     utilSpent: "израсходовано",
     sessionLeft: "Осталось · сессия (5ч)", weeklyLeft: "Осталось · неделя", mcpLeft: "Осталось · MCP",
-    footWhat: "Число", footWhatVal: "осталось", footWhen: "Сбросится", footSource: "Источник",
+    footWhen: "Сброс", footSource: "Источник",
     today: "Сегодня HH:MM", tomorrow: "Завтра HH:MM",
-    day: "День HH:MM",
     resetNow: "Сброс сейчас"
   }
 };
@@ -64,6 +68,11 @@ function $(id) { return document.getElementById(id); }
 
 function normalizeViewMode(v) {
   return VIEW_MODES.includes(v) ? v : "popup";
+}
+
+// Legacy stored value "clay" maps to "light".
+function normalizeTheme(v) {
+  return v === "dark" ? "dark" : "light";
 }
 
 function levelColor(p) {
@@ -195,6 +204,7 @@ function render(data) {
   $("loading").style.display = "none";
 
   const viewMode = normalizeViewMode(currentSettings.viewMode);
+  $("compact").classList.toggle("active", viewMode === "compact");
   if (viewMode === "compact") {
     $("fullView").style.display = "none";
     $("compactView").style.display = "";
@@ -230,7 +240,7 @@ function applyI18n() {
 }
 
 function applyTheme(theme) {
-  document.documentElement.setAttribute("data-theme", theme || "clay");
+  document.documentElement.setAttribute("data-theme", normalizeTheme(theme));
 }
 
 // ── Settings ──────────────────────────────────────────────
@@ -245,7 +255,7 @@ async function loadSettings() {
     intervalSec: r.intervalSec || 120,
     viewMode: normalizeViewMode(r.viewMode),
     lang: r.lang || "en",
-    theme: r.theme || "clay",
+    theme: normalizeTheme(r.theme),
     showMcp: r.showMcp || false
   };
   currentLang = currentSettings.lang;
@@ -335,7 +345,7 @@ async function togglePin() {
       });
       win.document.documentElement.setAttribute(
         "data-theme",
-        document.documentElement.getAttribute("data-theme") || "clay"
+        document.documentElement.getAttribute("data-theme") || "light"
       );
       // Live copy: clone the app markup and attach popup.js to it, so the
       // PiP window keeps polling and ticking on its own.
@@ -347,14 +357,14 @@ async function togglePin() {
       script.src = chrome.runtime.getURL("popup.js");
       win.document.body.appendChild(script);
       btn.dataset.pinned = "1";
-      btn.textContent = "📋";
+      btn.classList.add("active");
       win.addEventListener("pagehide", () => {
         btn.dataset.pinned = "0";
-        btn.textContent = "📌";
+        btn.classList.remove("active");
       });
     } catch (e) {
       btn.dataset.pinned = "0";
-      btn.textContent = "📌";
+      btn.classList.remove("active");
       popout();
     }
   } else {
@@ -362,13 +372,13 @@ async function togglePin() {
       if (documentPictureInPicture.window) documentPictureInPicture.window.close();
     } catch (e) {}
     btn.dataset.pinned = "0";
-    btn.textContent = "📌";
+    btn.classList.remove("active");
   }
 }
 
 async function popout() {
   const url = chrome.runtime.getURL("popup.html");
-  await chrome.windows.create({ url, type: "popup", width: 420, height: 650 });
+  await chrome.windows.create({ url, type: "popup", width: 360, height: 620 });
 }
 
 // ── Tick (countdown updates) ──────────────────────────────

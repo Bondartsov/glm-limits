@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="clay">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>GLM Mochi — GLM Limits</title>
+  <title>GLM Limits</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
@@ -11,15 +11,32 @@
     <!-- Header -->
     <header class="header">
       <div class="brand">
-        <span class="icon">🦞</span>
-        <span class="name" data-i18n="brand">GLM Mochi</span>
+        <span class="mark" aria-hidden="true">
+          <svg viewBox="0 0 18 18" width="18" height="18">
+            <rect width="18" height="18" rx="5" class="mark-bg"/>
+            <rect x="3.6" y="9.2" width="2.7" height="5.2" rx="1.35" fill="#ffffff" opacity="0.7"/>
+            <rect x="7.65" y="6.2" width="2.7" height="8.2" rx="1.35" fill="#ffffff" opacity="0.85"/>
+            <rect x="11.7" y="3.6" width="2.7" height="10.8" rx="1.35" fill="#ffffff"/>
+          </svg>
+        </span>
+        <span class="name" data-i18n="brand">GLM Limits</span>
       </div>
       <div class="actions">
-        <button id="refresh" class="btn-icon" title="Refresh" data-i18n-title="refresh">↻</button>
-        <button id="compact" class="btn-icon" title="Compact" data-i18n-title="compact">⊬</button>
-        <button id="pin" class="btn-icon" title="Pin on top" data-i18n-title="pin">📌</button>
-        <button id="popout" class="btn-icon" title="Pop out" data-i18n-title="popout">⤢</button>
-        <button id="settings" class="btn-icon" title="Settings" data-i18n-title="settings">⚙</button>
+        <button id="refresh" class="btn-icon" title="Refresh" data-i18n-title="refresh">
+          <svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        </button>
+        <button id="compact" class="btn-icon" title="Compact view" data-i18n-title="compact">
+          <svg viewBox="0 0 24 24"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+        </button>
+        <button id="pin" class="btn-icon" title="Pin on top" data-i18n-title="pin">
+          <svg viewBox="0 0 24 24"><line x1="12" y1="15.5" x2="12" y2="21.5"/><path d="M8.5 3.5h7l-.9 7.2 2.9 2.8H6.5l2.9-2.8-.9-7.2z"/></svg>
+        </button>
+        <button id="popout" class="btn-icon" title="Open in window" data-i18n-title="popout">
+          <svg viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+        </button>
+        <button id="settings" class="btn-icon" title="Settings" data-i18n-title="settings">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
       </div>
     </header>
 
@@ -38,7 +55,7 @@
       <div class="full-view" id="fullView">
         <!-- Primary metric: session (5h) -->
         <div class="metric primary" id="metricSession">
-          <div class="metric-label" data-i18n="sessionLeft">Осталось · сессия (5h)</div>
+          <div class="metric-label" data-i18n="sessionLeft">Left · session (5h)</div>
           <div class="metric-value">
             <span class="pct" id="sessionPct">—</span><span class="pct-unit">%</span>
           </div>
@@ -49,7 +66,7 @@
 
         <!-- Secondary metric: weekly -->
         <div class="metric" id="metricWeekly">
-          <div class="metric-label" data-i18n="weeklyLeft">Осталось · неделя</div>
+          <div class="metric-label" data-i18n="weeklyLeft">Left · weekly</div>
           <div class="metric-value">
             <span class="pct" id="weeklyPct">—</span><span class="pct-unit">%</span>
           </div>
@@ -60,7 +77,7 @@
 
         <!-- Optional: MCP usage -->
         <div class="metric optional" id="metricMcp" style="display:none">
-          <div class="metric-label" data-i18n="mcpLeft">Осталось · MCP</div>
+          <div class="metric-label" data-i18n="mcpLeft">Left · MCP</div>
           <div class="metric-value">
             <span class="pct" id="mcpPct">—</span><span class="pct-unit">%</span>
           </div>
@@ -86,18 +103,14 @@
       </div>
     </main>
 
-    <!-- Footer explanation -->
+    <!-- Footer -->
     <footer class="footer" id="footer" style="display:none">
       <div class="foot-row">
-        <span class="foot-key" data-i18n="footWhat">Число</span>
-        <span class="foot-val" data-i18n="footWhatVal">осталось</span>
-      </div>
-      <div class="foot-row">
-        <span class="foot-key" data-i18n="footWhen">Сброс</span>
+        <span class="foot-key" data-i18n="footWhen">Resets</span>
         <span class="foot-val" id="footReset">—</span>
       </div>
       <div class="foot-row">
-        <span class="foot-key" data-i18n="footSource">Источник</span>
+        <span class="foot-key" data-i18n="footSource">Source</span>
         <span class="foot-val" id="footSource">—</span>
       </div>
     </footer>
@@ -108,16 +121,17 @@
 
       <div class="field">
         <label data-i18n="apiKey">API Key</label>
-        <input type="password" id="apiKeyInput" placeholder="glm_… or zai_…">
+        <input type="password" id="apiKeyInput" placeholder="glm_… / zai_…">
         <small data-i18n="apiKeyHint">Your GLM Coding Plan API key. Never shared.</small>
       </div>
 
       <div class="field">
         <label data-i18n="platform">Platform</label>
         <select id="platformSelect">
-          <option value="cn" data-i18n="platformCn">China (open.bigmodel.cn)</option>
-          <option value="intl" data-i18n="platformIntl">International (api.z.ai)</option>
+          <option value="cn" data-i18n="platformCn">China · open.bigmodel.cn</option>
+          <option value="intl" data-i18n="platformIntl">International · api.z.ai</option>
         </select>
+        <small data-i18n="platformHint">Choose the site that issued your key.</small>
       </div>
 
       <div class="field">
@@ -145,7 +159,7 @@
       <div class="field">
         <label data-i18n="theme">Theme</label>
         <select id="themeSelect">
-          <option value="clay" data-i18n="themeClay">Clay</option>
+          <option value="light" data-i18n="themeLight">Light</option>
           <option value="dark" data-i18n="themeDark">Dark</option>
         </select>
       </div>
