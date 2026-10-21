@@ -4,3 +4,9 @@ desktop.ini
 *.zip
 *.crx
 *.pem
+
+# Трей-компаньон: локальный конфиг с ключом и логи — в git не попадают
+tray/tray_config.json
+tray/tray_app.log
+__pycache__/
+*.pyc
