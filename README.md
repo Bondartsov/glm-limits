@@ -1,31 +1,31 @@
 # GLM Mochi — GLM Limits
 
-A Chrome extension that shows your **GLM Coding Plan** session (5h) and weekly usage at a glance.
+Расширение для Chrome, которое показывает остаток квот **GLM Coding Plan** — 5-часовую сессию и недельное окно — одним взглядом.
 
-## Features
+## Возможности
 
-- **Session (5h) metric** — token-budget window from `TOKENS_LIMIT` (unit 3, number 5)
-- **Weekly metric** — from `TOKENS_LIMIT` (unit 6, number 1)
-- **Optional MCP usage** — from `TIME_LIMIT` (monthly meter)
-- **Color-coded bars** — green <50%, yellow <75%, amber <90%, red ≥90%
-- **Countdown to reset** — live-updating every second
-- **Three view modes** — popup, window, compact
-- **Document PiP** — pin on top
-- **i18n** — English / Русский
-- **Themes** — Clay / Dark
+- **Метрика «Сессия (5ч)»** — токенное окно из `TOKENS_LIMIT` (unit 3, number 5)
+- **Метрика «Неделя»** — из `TOKENS_LIMIT` (unit 6, number 1)
+- **Опциональная строка MCP** — из `TIME_LIMIT` (месячный счётчик)
+- **Цветовая индикация** — зелёный <50%, жёлтый <75%, янтарный <90%, красный ≥90%
+- **Обратный отсчёт до сброса** — обновление каждую секунду
+- **Три режима отображения** — popup, отдельное окно, компактный
+- **Document PiP** — закрепление поверх других окон
+- **Два языка** — English / Русский
+- **Две темы** — Clay / Dark
 
-## API contract
+## API
 
-The extension polls the GLM quota endpoint:
+Расширение опрашивает endpoint квот GLM:
 
 ```
-GET https://open.bigmodel.cn/api/monitor/usage/quota/limit   (China)
-GET https://api.z.ai/api/monitor/usage/quota/limit           (International)
+GET https://open.bigmodel.cn/api/monitor/usage/quota/limit   (Китай)
+GET https://api.z.ai/api/monitor/usage/quota/limit           (Международный)
 ```
 
-**Auth:** raw API key in `Authorization` header — **no `Bearer` prefix**.
+**Аутентификация:** raw API-ключ в заголовке `Authorization` — **без префикса `Bearer`**.
 
-Response shape:
+Формат ответа:
 
 ```json
 {
@@ -42,40 +42,56 @@ Response shape:
 }
 ```
 
-- `percentage` — how much of the window is **already used**; the UI shows the remaining share.
-- `nextResetTime` — epoch milliseconds; reset clocks follow Singapore Time (GMT+8).
-- Window selection: `TOKENS_LIMIT` with `unit=3, number=5` → session (5h); `unit=6, number=1` → weekly; `TIME_LIMIT` → optional monthly MCP row. Any other hourly/weekly `TOKENS_LIMIT` entry is used as a fallback when the canonical ones are absent.
+- `percentage` — сколько окна **уже израсходовано**; в UI показывается остаток (100 − percentage).
+- `nextResetTime` — epoch-миллисекунды; сброс по сингапурскому времени (GMT+8).
+- Выбор окна: `TOKENS_LIMIT` с `unit=3, number=5` → сессия (5ч); `unit=6, number=1` → неделя; `TIME_LIMIT` → опциональная месячная строка MCP. Прочие часовые/недельные записи `TOKENS_LIMIT` используются как fallback, если каноничных нет.
 
-## Installation
+Лимиты привязаны к аккаунту и тарифу, а не к конкретному ключу: все API-ключи одного аккаунта показывают один и тот же пул квот.
 
-1. Open `chrome://extensions`
-2. Enable **Developer mode** (top-right toggle)
-3. Click **Load unpacked** and select this directory
-4. Click the extension icon, enter your API key, choose platform, and save
+## Установка (режим разработчика)
 
-## Settings
+Расширение не публикуется в Chrome Web Store, поэтому ставится как распакованное:
 
-| Setting          | Description                                                  |
-| ---------------- | ------------------------------------------------------------ |
-| API Key          | Your GLM Coding Plan API key (stored locally in the browser) |
-| Platform         | China (open.bigmodel.cn) or International (api.z.ai)         |
-| Refresh interval | Seconds between polls (30–3600, default 120)                 |
-| View mode        | Popup, Window, or Compact                                    |
-| Language         | English / Русский                                            |
-| Theme            | Clay / Dark                                                  |
-| Show MCP         | Display MCP usage row                                        |
+1. Скачайте или склонируйте репозиторий в отдельную папку.
+2. Откройте `chrome://extensions`.
+3. Включите **Режим разработчика** (переключатель в правом верхнем углу).
+4. Нажмите **Загрузить распакованное расширение** и выберите папку проекта.
+5. Кликните по иконке расширения на панели, нажмите ⚙ (Settings), введите API-ключ, выберите платформу и нажмите **Save**.
 
-The API key is entered once in the extension settings and kept in `chrome.storage.local` on your machine; it is only sent to the selected GLM quota endpoint.
+Другие браузеры на Chromium:
 
-## Files
+- **Microsoft Edge**: откройте `edge://extensions`, включите «Режим разработчика» (переключатель слева), нажмите «Загрузить распакованное».
+- **Яндекс Браузер**: `browser://tune/` → раздел «Инструменты» → «Расширения», внизу страницы включите «Режим разработчика», нажмите «Загрузить распакованное расширение».
+- После изменения кода нажимайте ↻ (Reload) на карточке расширения, чтобы изменения вступили в силу.
 
-- `manifest.json` — MV3 manifest
-- `background.js` — service worker: polling, caching, settings
-- `popup.html` — UI markup
-- `popup.css` — styling
-- `popup.js` — rendering, settings, i18n, PiP
-- `icons/icon16.png`, `icon48.png`, `icon128.png` — toolbar icons
+## Где взять API-ключ
 
-## License
+- Международная платформа: консоль [z.ai](https://z.ai) → API Keys.
+- Китайская платформа: консоль [bigmodel.cn](https://open.bigmodel.cn) → API Keys.
+
+Ключ хранится только локально в браузере (`chrome.storage.local`) и отправляется исключительно на выбранный endpoint квот.
+
+## Настройки
+
+| Параметр         | Описание                                               |
+| ---------------- | ------------------------------------------------------ |
+| API Key          | API-ключ GLM Coding Plan (хранится локально)           |
+| Platform         | Китай (open.bigmodel.cn) или Международный (api.z.ai)  |
+| Refresh interval | Интервал опроса в секундах (30–3600, по умолчанию 120) |
+| View mode        | Popup, Window или Compact                              |
+| Language         | English / Русский                                      |
+| Theme            | Clay / Dark                                            |
+| Show MCP         | Показывать строку MCP                                  |
+
+## Файлы
+
+- `manifest.json` — манифест MV3
+- `background.js` — service worker: опрос, кэш, настройки
+- `popup.html` — разметка UI
+- `popup.css` — стили
+- `popup.js` — рендеринг, настройки, i18n, PiP
+- `icons/icon16.png`, `icon48.png`, `icon128.png` — иконки
+
+## Лицензия
 
 MIT
