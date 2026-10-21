@@ -71,6 +71,9 @@ STRINGS = {
         "upd_none": "Уже последняя версия.",
         "upd_fail": "Ошибка обновления: {e}",
         "auto_on": "Автозапуск включён", "auto_off": "Автозапуск выключен",
+        "restart": "Перезапустить", "restarting": "Перезапускаюсь…",
+        "tray_restarting": "Обновлено — перезапускаю трей…",
+        "restart_fail": "Не удалось перезапуститься — сделай это вручную",
         "key_menu": "API-ключ…",
         "key_prompt": "Новый API-ключ (ввод скрыт):",
         "key_current_set": "Сейчас: задан (••••{tail})",
@@ -94,6 +97,9 @@ STRINGS = {
         "upd_none": "Already up to date.",
         "upd_fail": "Update failed: {e}",
         "auto_on": "Autostart enabled", "auto_off": "Autostart disabled",
+        "restart": "Restart", "restarting": "Restarting…",
+        "tray_restarting": "Updated — restarting the tray…",
+        "restart_fail": "Couldn't restart itself — please do it manually",
         "key_menu": "API key…",
         "key_prompt": "New API key (input hidden):",
         "key_current_set": "Current: set (••••{tail})",
@@ -493,8 +499,16 @@ class TrayApp:
             if proc.returncode != 0:
                 raise RuntimeError((out.strip() or "git failed")[:120])
             changed = "fast-forward" in out.lower() or "files changed" in out.lower()
-            if icon:
-                icon.notify(self.tr("upd_done") if changed else self.tr("upd_none"), APP_NAME)
+            if not changed:
+                if icon:
+                    icon.notify(self.tr("upd_none"), APP_NAME)
+                return
+            if "tray/" in out.lower():
+                # Обновились файлы самого трея — текущий процесс со старым кодом:
+                # перезапускаем себя, чтобы новый код заработал сразу.
+                self.restart_self(self.tr("tray_restarting"))
+            elif icon:
+                icon.notify(self.tr("upd_done"), APP_NAME)
         except Exception as exc:
             logger.exception("Обновление расширения не удалось")
             if icon:
@@ -586,6 +600,34 @@ class TrayApp:
         win.bind("<Escape>", lambda event: on_close())
         win.mainloop()
 
+    def restart_self(self, notify_text: str | None = None) -> None:
+        """Запускает новую копию трей-приложения и завершает текущую."""
+        def worker() -> None:
+            if notify_text:
+                self._notify_tray(notify_text)
+                time.sleep(2.0)  # дать уведомлению показаться
+            try:
+                flags = (getattr(subprocess, "DETACHED_PROCESS", 0)
+                         | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+                subprocess.Popen(
+                    [sys.executable, str(Path(__file__).resolve())],
+                    creationflags=flags, close_fds=True,
+                )
+                logger.info("Новый процесс трея запущен, текущий завершается")
+            except Exception:
+                logger.exception("Не удалось запустить новую копию")
+                self._notify_tray(self.tr("restart_fail"))
+                return
+            self.stop_evt.set()
+            self.wake.set()
+            if self.icon:
+                self.icon.stop()
+
+        threading.Thread(target=worker, name="restart", daemon=True).start()
+
+    def on_restart(self, icon: pystray.Icon, item: pystray.MenuItem) -> None:
+        self.restart_self(self.tr("restarting"))
+
     def build_menu(self) -> pystray.Menu:
         return pystray.Menu(
             pystray.MenuItem(self.line_session, None, enabled=False),
@@ -601,6 +643,7 @@ class TrayApp:
                 checked=lambda item: is_autostart_on(), radio=False,
             ),
             pystray.Menu.SEPARATOR,
+            pystray.MenuItem(lambda item: self.tr("restart"), self.on_restart),
             pystray.MenuItem(lambda item: self.tr("exit"), self.on_exit),
         )
 
