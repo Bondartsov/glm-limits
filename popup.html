@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="clay">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GLM Mochi — GLM Limits</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="app" id="app">
+    <!-- Header -->
+    <header class="header">
+      <div class="brand">
+        <span class="icon">🦞</span>
+        <span class="name" data-i18n="brand">GLM Mochi</span>
+      </div>
+      <div class="actions">
+        <button id="refresh" class="btn-icon" title="Refresh" data-i18n-title="refresh">↻</button>
+        <button id="compact" class="btn-icon" title="Compact" data-i18n-title="compact">⊬</button>
+        <button id="pin" class="btn-icon" title="Pin on top" data-i18n-title="pin">📌</button>
+        <button id="popout" class="btn-icon" title="Pop out" data-i18n-title="popout">⤢</button>
+        <button id="settings" class="btn-icon" title="Settings" data-i18n-title="settings">⚙</button>
+      </div>
+    </header>
+
+    <!-- Status line -->
+    <div class="status" id="status">
+      <span class="dot offline"></span>
+      <span class="status-text" data-i18n="statusOffline">Offline</span>
+    </div>
+
+    <!-- Main content -->
+    <main class="content" id="content">
+      <!-- Loading state -->
+      <div class="loading" id="loading" data-i18n="loading">Loading…</div>
+
+      <!-- Full view -->
+      <div class="full-view" id="fullView">
+        <!-- Primary metric: session (5h) -->
+        <div class="metric primary" id="metricSession">
+          <div class="metric-label" data-i18n="sessionLeft">Осталось · сессия (5h)</div>
+          <div class="metric-value">
+            <span class="pct" id="sessionPct">—</span><span class="pct-unit">%</span>
+          </div>
+          <div class="metric-anno" id="sessionAnno"></div>
+          <div class="bar-track"><div class="bar-fill" id="sessionBar"></div></div>
+          <div class="reset" id="sessionReset"></div>
+        </div>
+
+        <!-- Secondary metric: weekly -->
+        <div class="metric" id="metricWeekly">
+          <div class="metric-label" data-i18n="weeklyLeft">Осталось · неделя</div>
+          <div class="metric-value">
+            <span class="pct" id="weeklyPct">—</span><span class="pct-unit">%</span>
+          </div>
+          <div class="metric-anno" id="weeklyAnno"></div>
+          <div class="bar-track"><div class="bar-fill" id="weeklyBar"></div></div>
+          <div class="reset" id="weeklyReset"></div>
+        </div>
+
+        <!-- Optional: MCP usage -->
+        <div class="metric optional" id="metricMcp" style="display:none">
+          <div class="metric-label" data-i18n="mcpLeft">Осталось · MCP</div>
+          <div class="metric-value">
+            <span class="pct" id="mcpPct">—</span><span class="pct-unit">%</span>
+          </div>
+          <div class="metric-anno" id="mcpAnno"></div>
+          <div class="bar-track"><div class="bar-fill" id="mcpBar"></div></div>
+          <div class="reset" id="mcpReset"></div>
+        </div>
+
+        <!-- Plan badge -->
+        <div class="plan-badge" id="planBadge"></div>
+      </div>
+
+      <!-- Compact view -->
+      <div class="compact-view" id="compactView" style="display:none">
+        <div class="chip" id="chipSession">
+          <span class="chip-label" data-i18n="session">Session</span>
+          <span class="chip-pct" id="chipSessionPct">—</span>
+        </div>
+        <div class="chip" id="chipWeekly">
+          <span class="chip-label" data-i18n="weekly">Weekly</span>
+          <span class="chip-pct" id="chipWeeklyPct">—</span>
+        </div>
+      </div>
+    </main>
+
+    <!-- Footer explanation -->
+    <footer class="footer" id="footer" style="display:none">
+      <div class="foot-row">
+        <span class="foot-key" data-i18n="footWhat">Число</span>
+        <span class="foot-val" data-i18n="footWhatVal">осталось</span>
+      </div>
+      <div class="foot-row">
+        <span class="foot-key" data-i18n="footWhen">Сброс</span>
+        <span class="foot-val" id="footReset">—</span>
+      </div>
+      <div class="foot-row">
+        <span class="foot-key" data-i18n="footSource">Источник</span>
+        <span class="foot-val" id="footSource">—</span>
+      </div>
+    </footer>
+
+    <!-- Settings panel -->
+    <div class="settings-panel" id="settingsPanel" style="display:none">
+      <h3 data-i18n="settings">Settings</h3>
+
+      <div class="field">
+        <label data-i18n="apiKey">API Key</label>
+        <input type="password" id="apiKeyInput" placeholder="glm_… or zai_…">
+        <small data-i18n="apiKeyHint">Your GLM Coding Plan API key. Never shared.</small>
+      </div>
+
+      <div class="field">
+        <label data-i18n="platform">Platform</label>
+        <select id="platformSelect">
+          <option value="cn" data-i18n="platformCn">China (open.bigmodel.cn)</option>
+          <option value="intl" data-i18n="platformIntl">International (api.z.ai)</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label data-i18n="interval">Refresh interval (sec)</label>
+        <input type="number" id="intervalInput" min="30" max="3600" value="120">
+      </div>
+
+      <div class="field">
+        <label data-i18n="viewMode">View mode</label>
+        <select id="viewModeSelect">
+          <option value="popup" data-i18n="viewPopup">Popup</option>
+          <option value="window" data-i18n="viewWindow">Window</option>
+          <option value="compact" data-i18n="viewCompact">Compact</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label data-i18n="language">Language</label>
+        <select id="langSelect">
+          <option value="en">English</option>
+          <option value="ru">Русский</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label data-i18n="theme">Theme</label>
+        <select id="themeSelect">
+          <option value="clay" data-i18n="themeClay">Clay</option>
+          <option value="dark" data-i18n="themeDark">Dark</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label data-i18n="showMcp">Show MCP usage</label>
+        <input type="checkbox" id="showMcpCheck">
+      </div>
+
+      <div class="actions-row">
+        <button id="saveSettings" class="btn-primary" data-i18n="save">Save</button>
+        <button id="resetSettings" class="btn-ghost" data-i18n="reset">Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
