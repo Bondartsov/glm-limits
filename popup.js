@@ -23,6 +23,8 @@ const I18N = {
     themeLight: "Light", themeDark: "Dark",
     showMcp: "Show MCP usage",
     notifyLabel: "Notify at 80/90% of session",
+    badgeLabel: "Show percent on icon",
+    badgeMetricLabel: "Icon shows",
     save: "Save", reset: "Reset",
     plan: "Plan",
     utilSpent: "used",
@@ -51,6 +53,8 @@ const I18N = {
     themeLight: "Светлая", themeDark: "Тёмная",
     showMcp: "Показывать MCP",
     notifyLabel: "Уведомлять при 80/90% сессии",
+    badgeLabel: "Процент на иконке",
+    badgeMetricLabel: "Что показывает иконка",
     save: "Сохранить", reset: "Сбросить",
     plan: "Тариф",
     utilSpent: "израсходовано",
@@ -308,7 +312,7 @@ function applyTheme(theme) {
 async function loadSettings() {
   const r = await chrome.storage.local.get([
     "apiKey", "platform", "intervalSec", "viewMode",
-    "lang", "theme", "showMcp", "notify"
+    "lang", "theme", "showMcp", "notify", "badge", "badgeMetric"
   ]);
   currentSettings = {
     apiKey: r.apiKey || "",
@@ -318,7 +322,9 @@ async function loadSettings() {
     lang: r.lang || "en",
     theme: normalizeTheme(r.theme),
     showMcp: r.showMcp || false,
-    notify: r.notify !== false
+    notify: r.notify !== false,
+    badge: r.badge !== false,
+    badgeMetric: r.badgeMetric === "w" ? "w" : "s"
   };
   currentLang = currentSettings.lang;
 
@@ -330,9 +336,12 @@ async function loadSettings() {
   $("themeSelect").value = currentSettings.theme;
   $("showMcpCheck").checked = currentSettings.showMcp;
   $("notifyCheck").checked = currentSettings.notify;
+  $("badgeCheck").checked = currentSettings.badge;
+  $("badgeMetricSelect").value = currentSettings.badgeMetric;
 
   applyI18n();
   applyTheme(currentSettings.theme);
+  updateBadgeField();
 }
 
 async function saveSettings() {
@@ -344,7 +353,9 @@ async function saveSettings() {
     lang: $("langSelect").value,
     theme: $("themeSelect").value,
     showMcp: $("showMcpCheck").checked,
-    notify: $("notifyCheck").checked
+    notify: $("notifyCheck").checked,
+    badge: $("badgeCheck").checked,
+    badgeMetric: $("badgeMetricSelect").value
   };
   await chrome.storage.local.set(currentSettings);
   currentLang = currentSettings.lang;
@@ -359,7 +370,7 @@ async function saveSettings() {
 async function resetSettings() {
   await chrome.storage.local.remove([
     "apiKey", "platform", "intervalSec", "viewMode",
-    "lang", "theme", "showMcp", "notify"
+    "lang", "theme", "showMcp", "notify", "badge", "badgeMetric"
   ]);
   await loadSettings();
   // Background keeps its own alarm/popup state — re-apply defaults there too.
@@ -391,6 +402,13 @@ function toggleCompact() {
 function toggleSettings() {
   const panel = $("settingsPanel");
   panel.style.display = panel.style.display === "none" ? "" : "none";
+}
+
+// The "which metric" select only makes sense when the badge is on.
+function updateBadgeField() {
+  const on = $("badgeCheck").checked;
+  const field = $("badgeMetricField");
+  if (field) field.style.display = on ? "" : "none";
 }
 
 async function togglePin() {
@@ -468,6 +486,7 @@ async function init() {
   $("settings").addEventListener("click", toggleSettings);
   $("pin").addEventListener("click", togglePin);
   $("popout").addEventListener("click", popout);
+  $("badgeCheck").addEventListener("change", updateBadgeField);
   $("saveSettings").addEventListener("click", saveSettings);
   $("resetSettings").addEventListener("click", resetSettings);
 

@@ -177,6 +177,19 @@
         <input type="checkbox" id="notifyCheck">
       </div>
 
+      <div class="field">
+        <label data-i18n="badgeLabel">Show percent on icon</label>
+        <input type="checkbox" id="badgeCheck">
+      </div>
+
+      <div class="field" id="badgeMetricField">
+        <label data-i18n="badgeMetricLabel">Icon shows</label>
+        <select id="badgeMetricSelect">
+          <option value="s" data-i18n="session">Session (5h)</option>
+          <option value="w" data-i18n="weekly">Weekly</option>
+        </select>
+      </div>
+
       <div class="actions-row">
         <button id="saveSettings" class="btn-primary" data-i18n="save">Save</button>
         <button id="resetSettings" class="btn-ghost" data-i18n="reset">Reset</button>

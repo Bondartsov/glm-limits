@@ -24,7 +24,8 @@ const NOTIFY_THRESHOLDS = [
 async function getSettings() {
   // Flat keys — must match popup.js loadSettings/saveSettings.
   const r = await chrome.storage.local.get([
-    "apiKey", "platform", "intervalSec", "viewMode", "lang", "notify"
+    "apiKey", "platform", "intervalSec", "viewMode", "lang", "notify",
+    "badge", "badgeMetric"
   ]);
   return {
     apiKey: r.apiKey || DEFAULTS.apiKey,
@@ -33,6 +34,8 @@ async function getSettings() {
     viewMode: VIEW_MODES.includes(r.viewMode) ? r.viewMode : DEFAULTS.viewMode,
     lang: r.lang || "en",
     notify: r.notify !== false,
+    badge: r.badge !== false,
+    badgeMetric: r.badgeMetric === "w" ? "w" : "s",
   };
 }
 
@@ -136,6 +139,7 @@ async function poll() {
       sevenDay ? sevenDay.utilization : null
     );
     await maybeNotify(st, fiveHour);
+    await updateBadge(st, fiveHour, sevenDay);
 
     // Store full window objects — popup reads { utilization, resetsAt }.
     const latest = {
@@ -212,6 +216,30 @@ function fireNotification(lang, used, threshold) {
       title: "GLM Limits — " + threshold + "%",
       message,
     });
+  } catch (e) {}
+}
+
+// Toolbar badge: percent used of the chosen window, background colored by
+// the same thresholds as the bars (50/75/90). Hex literals — no DOM/CSS vars
+// inside the service worker.
+function badgeColor(used) {
+  if (used < 50) return "#5a9367";
+  if (used < 75) return "#c2a14a";
+  if (used < 90) return "#bf7a40";
+  return "#b5524c";
+}
+
+async function updateBadge(st, fiveHour, sevenDay) {
+  try {
+    const win = st.badgeMetric === "w" ? sevenDay : fiveHour;
+    if (!st.badge || !win || typeof win.utilization !== "number") {
+      await chrome.action.setBadgeText({ text: "" });
+      return;
+    }
+    const used = Math.max(0, Math.min(100, Math.round(win.utilization)));
+    await chrome.action.setBadgeBackgroundColor({ color: badgeColor(used) });
+    try { await chrome.action.setBadgeTextColor({ color: "#ffffff" }); } catch (e) {}
+    await chrome.action.setBadgeText({ text: String(used) });
   } catch (e) {}
 }
 
