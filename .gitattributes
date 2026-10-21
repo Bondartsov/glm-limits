@@ -1,0 +1,2 @@
+# Batch-файлы требуют CRLF — cmd спотыкается об LF.
+*.bat text eol=crlf
