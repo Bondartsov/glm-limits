@@ -255,6 +255,14 @@ function renderFooter(data) {
   $("footSource").textContent = "v" + chrome.runtime.getManifest().version + " · "
     + (data.platform === "intl" ? "api.z.ai" : "open.bigmodel.cn")
     + (data.ts ? " · " + new Date(data.ts).toLocaleTimeString() : "");
+  // Дата последнего обновления кода (пишется при самоперезапуске после git pull).
+  chrome.storage.local.get("lastUpdate").then((r) => {
+    const lu = r.lastUpdate;
+    if (!lu || !lu.at) return;
+    const d = new Date(lu.at);
+    const when = d.toLocaleDateString() + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    $("footSource").textContent += (currentLang === "ru" ? " · обновлено " : " · updated ") + when;
+  }).catch(() => {});
 }
 
 function render(data) {

@@ -11,6 +11,9 @@ const PLATFORMS = ["auto", "cn", "intl"];
 const HOSTS = { cn: "https://open.bigmodel.cn", intl: "https://api.z.ai" };
 const QUOTA_PATH = "/api/monitor/usage/quota/limit";
 
+// Upstream manifest for "new version available" checks (branch main).
+const RAW_MANIFEST_URL = "https://raw.githubusercontent.com/Bondartsov/glm-limits/main/manifest.json";
+
 // Sparkline history: one point per 5 minutes is enough, capped to stay small.
 const HISTORY_STEP_MS = 5 * 60 * 1000;
 const HISTORY_MAX_POINTS = 800;
@@ -90,26 +93,59 @@ function normalizeWindow(item) {
   return { utilization: Math.min(Math.max(pct, 0), 100), resetsAt };
 }
 
-// Self-update for the unpacked flow: after `git pull` the manifest on disk
-// already has the new version, while the loaded one stays old. Unpacked
-// extension files are served live from disk, so fetching our own manifest
-// detects the change — then we reload ourselves. No-op for packed builds.
-async function checkForUpdate() {
+// Self-update for the unpacked flow, in two steps:
+//  1) disk vs loaded manifest — after `git pull` the file on disk already has
+//     the new version (unpacked files are served live): record lastUpdate,
+//     fire the "updated" notification and reload ourselves (no-op for packed);
+//  2) upstream check on GitHub — if a newer version exists but is not pulled
+//     yet, notify once per version: update via the tray menu.
+async function checkForUpdate(st) {
+  const ru = st.lang === "ru";
   try {
     const r = await fetch(chrome.runtime.getURL("manifest.json"), { cache: "no-store" });
     const disk = await r.json();
     const loaded = chrome.runtime.getManifest();
     if (disk && disk.version && loaded && disk.version !== loaded.version) {
+      await chrome.storage.local.set({ lastUpdate: { version: disk.version, at: Date.now() } });
+      try {
+        chrome.notifications.create({
+          type: "basic",
+          iconUrl: "icons/icon128.png",
+          title: "GLM Limits " + disk.version,
+          message: ru ? "Расширение успешно обновлено." : "Extension successfully updated.",
+        });
+      } catch (e) { /* уведомления недоступны — не критично */ }
       console.info("[GLM Limits] new version on disk:", disk.version, "- reloading");
       chrome.runtime.reload();
+      return;
     }
   } catch (e) { /* best-effort */ }
+
+  try {
+    const store = await chrome.storage.local.get("updNotified");
+    const r = await fetch(RAW_MANIFEST_URL, { cache: "no-store" });
+    if (!r.ok) return;
+    const remote = await r.json();
+    const loaded = chrome.runtime.getManifest();
+    if (remote && remote.version && loaded &&
+        remote.version !== loaded.version && store.updNotified !== remote.version) {
+      await chrome.storage.local.set({ updNotified: remote.version });
+      chrome.notifications.create({
+        type: "basic",
+        iconUrl: "icons/icon128.png",
+        title: "GLM Limits — " + (ru ? "доступна " : "available ") + remote.version,
+        message: ru
+          ? "Новая версия " + remote.version + ". Обнови: иконка в трее → «Обновить расширение»."
+          : "New version " + remote.version + ". Update via the tray menu → \"Update extension\".",
+      });
+    }
+  } catch (e) { /* нет сети или GitHub недоступен — молча */ }
 }
 
 async function poll() {
   try {
-    await checkForUpdate();
     const st = await getSettings();
+    await checkForUpdate(st);
     if (!st.apiKey || !st.apiKey.trim()) {
       await chrome.storage.local.set({ latest: { ok: false, error: "No API key. Set it in settings.", ts: Date.now() } });
       throw new Error("no api key");
@@ -264,7 +300,19 @@ async function updateBadge(st, fiveHour, sevenDay) {
   } catch (e) {}
 }
 
-chrome.runtime.onInstalled.addListener(() => { applySettings(); poll().catch(() => {}); });
+chrome.runtime.onInstalled.addListener((details) => {
+  applySettings();
+  poll().catch(() => {});
+  // Точка отсчёта "даты обновления" — момент установки (перезаписывается
+  // при каждом обновлении через checkForUpdate).
+  chrome.storage.local.get("lastUpdate").then((r) => {
+    if (!r.lastUpdate) {
+      chrome.storage.local.set({
+        lastUpdate: { version: chrome.runtime.getManifest().version, at: Date.now() },
+      });
+    }
+  });
+});
 chrome.runtime.onStartup.addListener(() => { applySettings(); poll().catch(() => {}); });
 chrome.alarms.onAlarm.addListener((a) => { if (a.name === "poll") poll().catch(() => {}); });
 

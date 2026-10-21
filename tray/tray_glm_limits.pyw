@@ -327,6 +327,15 @@ def read_repo_version() -> str:
         return "?"
 
 
+def repo_update_time() -> str:
+    """Дата/время последнего обновления кода — mtime манифеста на диске."""
+    try:
+        mtime = (REPO_DIR / "manifest.json").stat().st_mtime
+        return datetime.fromtimestamp(mtime).strftime("%d.%m.%Y %H:%M")
+    except OSError:
+        return ""
+
+
 class State:
     """Общее состояние между потоком опроса и иконкой/меню/окном."""
 
@@ -378,6 +387,11 @@ class TrayApp:
         if not s:
             return f"{self.tr('reset')}: —"
         return f"{self.tr('reset')} {fmt_countdown(s['resets_at'], self.current_cfg['lang'])}"
+
+    def line_version(self, *args: Any) -> str:
+        ver = read_repo_version()
+        upd = repo_update_time()
+        return f"{APP_NAME} v{ver}" + (f" · {self.tr('updated_at')} {upd}" if upd else "")
 
     # ── tooltip / иконка ─────────────────────────────────────
     def tooltip(self) -> str:
@@ -630,6 +644,7 @@ class TrayApp:
 
     def build_menu(self) -> pystray.Menu:
         return pystray.Menu(
+            pystray.MenuItem(self.line_version, None, enabled=False),
             pystray.MenuItem(self.line_session, None, enabled=False),
             pystray.MenuItem(self.line_weekly, None, enabled=False),
             pystray.MenuItem(self.line_reset, None, enabled=False),
@@ -667,10 +682,11 @@ class TrayApp:
              "muted": "#8f9094", "border": "#2c2e32", "accent": "#7ea6c7"}
         lang = self.current_cfg["lang"]
         ext_version = read_repo_version()
+        upd_time = repo_update_time()
 
         win = tk.Tk()
         win.title(f"{APP_NAME} v{ext_version}")
-        win.geometry("330x470")
+        win.geometry("330x490")
         win.resizable(False, False)
         win.attributes("-topmost", True)
         win.configure(bg=c["bg"])
@@ -684,6 +700,10 @@ class TrayApp:
 
         tk.Label(win, text=f"{APP_NAME}  v{ext_version}", font=("Segoe UI", 13, "bold"),
                  fg=c["text"], bg=c["bg"]).pack(anchor="w", padx=16, pady=(12, 0))
+        upd_lbl = tk.Label(win, text="", font=("Segoe UI", 8), fg=c["muted"], bg=c["bg"])
+        upd_lbl.pack(anchor="w", padx=16)
+        if upd_time:
+            upd_lbl.config(text=f"{self.tr('updated_at')}: {upd_time}")
         plan_lbl = tk.Label(win, text="", font=("Segoe UI", 9), fg=c["accent"], bg=c["bg"])
         plan_lbl.pack(anchor="w", padx=16, pady=(0, 4))
 
