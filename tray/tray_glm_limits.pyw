@@ -205,7 +205,8 @@ def fetch_quota(api_key: str, platform: str) -> dict[str, Any]:
         itype, unit, number = item.get("type"), item.get("unit"), item.get("number")
         if itype == "TIME_LIMIT":
             mcp = norm(item)
-        elif itype == "TOKENS_LIMIT":
+        elif itype in ("TOKENS_LIMIT", "CREDIT_LIMIT"):
+            # CREDIT_LIMIT — кредитные окна bigmodel.cn, семантика та же.
             if unit == 3 and number == 5:
                 s = norm(item)
             elif unit == 6 and number == 1:

@@ -171,7 +171,10 @@ async function poll() {
         mcp = normalizeWindow(item);
         continue;
       }
-      if (item.type !== "TOKENS_LIMIT") continue;
+      // Окна тарифа приходят и как TOKENS_LIMIT, и как CREDIT_LIMIT
+      // (кредитные окна bigmodel.cn: usage = лимит, currentValue = потрачено) —
+      // семантика percentage/unit/number та же.
+      if (item.type !== "TOKENS_LIMIT" && item.type !== "CREDIT_LIMIT") continue;
 
       const unit = Number(item.unit);
       const number = Number(item.number);
