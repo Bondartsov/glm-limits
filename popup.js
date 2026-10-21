@@ -252,7 +252,8 @@ function renderFooter(data) {
   $("footReset").textContent = (s && s.resetsAt)
     ? fmtCountdown(new Date(s.resetsAt).getTime()) + " · " + fmtAt(new Date(s.resetsAt).getTime())
     : "—";
-  $("footSource").textContent = (data.platform === "intl" ? "api.z.ai" : "open.bigmodel.cn")
+  $("footSource").textContent = "v" + chrome.runtime.getManifest().version + " · "
+    + (data.platform === "intl" ? "api.z.ai" : "open.bigmodel.cn")
     + (data.ts ? " · " + new Date(data.ts).toLocaleTimeString() : "");
 }
 

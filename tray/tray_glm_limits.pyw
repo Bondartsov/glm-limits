@@ -3,8 +3,16 @@ GLM Limits — трей-компаньон (Windows).
 
 Показывает остаток квот GLM Coding Plan в системном трее:
 цветная иконка с процентом, tooltip с деталями и временем сброса,
-меню с данными, уведомления при 80/90% сессии. Общается с тем же
-API, что и браузерное расширение (raw API-ключ, без Bearer).
+окно с подробной информацией по левому клику, меню с данными,
+уведомления при 80/90% сессии. Общается с тем же API, что и
+браузерное расширение (raw API-ключ, без Bearer).
+
+Меню трея:
+  - «Показать детали» (или левый клик по иконке) — окно с метриками;
+  - «Обновить данные» — внеочередной опрос;
+  - «Обновить расширение» — git pull репозитория; расширение заметит
+    новую версию манифеста на диске и перезапустится само;
+  - «Автозапуск при входе в Windows» — тумблер (ветка Run в HKCU).
 
 Конфиг: tray_config.json рядом со скриптом (создаётся при первом
 запуске; ключ можно задать и через переменные окружения
@@ -20,6 +28,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -35,6 +44,7 @@ APP_NAME = "GLM Limits"
 HOSTS = {"cn": "https://open.bigmodel.cn", "intl": "https://api.z.ai"}
 QUOTA_PATH = "/api/monitor/usage/quota/limit"
 PLATFORMS = ("auto", "cn", "intl")
+RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 
 # Пороги расхода — те же, что в расширении.
 COLOR_GREEN, COLOR_YELLOW, COLOR_AMBER, COLOR_RED, COLOR_GRAY = (
@@ -42,6 +52,7 @@ COLOR_GREEN, COLOR_YELLOW, COLOR_AMBER, COLOR_RED, COLOR_GRAY = (
 )
 
 BASE_DIR = Path(__file__).resolve().parent
+REPO_DIR = BASE_DIR.parent          # корень репозитория (для git pull)
 CONFIG_PATH = BASE_DIR / "tray_config.json"
 LOG_PATH = BASE_DIR / "tray_app.log"
 
@@ -50,19 +61,35 @@ logger = logging.getLogger("glm-limits.tray")
 STRINGS = {
     "ru": {
         "session": "Сессия (5ч)", "weekly": "Неделя",
-        "left": "осталось",
+        "left": "осталось", "used": "израсходовано",
         "no_data": "Нет данных", "error": "Ошибка",
-        "reset": "сброс через", "refresh": "Обновить сейчас", "exit": "Выход",
+        "reset": "сброс через", "refresh": "Обновить данные",
+        "details": "Показать детали", "exit": "Выход",
+        "upd_ext": "Обновить расширение",
+        "autostart": "Автозапуск при входе в Windows",
+        "upd_done": "Расширение обновлено. Само перезапустится за пару минут — или кликни по его иконке.",
+        "upd_none": "Уже последняя версия.",
+        "upd_fail": "Ошибка обновления: {e}",
+        "auto_on": "Автозапуск включён", "auto_off": "Автозапуск выключен",
         "notify": "Сессия израсходована на {u}%. Осталось {l}%.",
         "no_key": "Ключ не задан (tray_config.json)",
+        "updated_at": "Обновлено",
     },
     "en": {
         "session": "Session (5h)", "weekly": "Weekly",
-        "left": "left",
+        "left": "left", "used": "used",
         "no_data": "No data", "error": "Error",
-        "reset": "resets in", "refresh": "Refresh now", "exit": "Exit",
+        "reset": "resets in", "refresh": "Refresh data",
+        "details": "Show details", "exit": "Exit",
+        "upd_ext": "Update extension",
+        "autostart": "Start with Windows",
+        "upd_done": "Extension updated. It will reload itself within a couple of minutes — or click its icon.",
+        "upd_none": "Already up to date.",
+        "upd_fail": "Update failed: {e}",
+        "auto_on": "Autostart enabled", "auto_off": "Autostart disabled",
         "notify": "Session is {u}% used. {l}% left.",
         "no_key": "API key is not set (tray_config.json)",
+        "updated_at": "Updated",
     },
 }
 
@@ -168,7 +195,7 @@ def fetch_quota(api_key: str, platform: str) -> dict[str, Any]:
             elif w is None and unit == 6:
                 w = norm(item)
     return {"ok": True, "error": None, "platform": platform, "plan": data.get("level"),
-            "s": s, "w": w, "mcp": mcp}
+            "s": s, "w": w, "mcp": mcp, "ts": time.time()}
 
 
 def color_for(used: float) -> str:
@@ -225,8 +252,63 @@ def fmt_countdown(iso: str | None, lang: str) -> str:
     return f"{m}m"
 
 
+def fmt_at_time(iso: str | None) -> str:
+    """Локальное время сброса в формате HH:MM."""
+    if not iso:
+        return "—"
+    try:
+        return datetime.fromisoformat(iso).astimezone().strftime("%H:%M")
+    except ValueError:
+        return "—"
+
+
+# ── Автозапуск (ветка Run в HKCU) ────────────────────────────
+def _pythonw_path() -> str:
+    exe = Path(sys.executable)
+    pythonw = exe.with_name("pythonw.exe")
+    return str(pythonw) if pythonw.exists() else str(exe)
+
+
+def autostart_command() -> str:
+    return f'"{_pythonw_path()}" "{Path(__file__).resolve()}"'
+
+
+def is_autostart_on() -> bool:
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as key:
+            winreg.QueryValueEx(key, APP_NAME)
+            return True
+    except OSError:
+        return False
+
+
+def set_autostart(enable: bool) -> None:
+    import winreg
+    with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, RUN_KEY, 0,
+                            winreg.KEY_SET_VALUE) as key:
+        if enable:
+            winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, autostart_command())
+            logger.info("Автозапуск включён: %s", autostart_command())
+        else:
+            try:
+                winreg.DeleteValue(key, APP_NAME)
+                logger.info("Автозапуск выключен")
+            except FileNotFoundError:
+                pass
+
+
+def read_repo_version() -> str:
+    """Версия расширения из манифеста репозитория (для окна деталей)."""
+    try:
+        manifest = json.loads((REPO_DIR / "manifest.json").read_text(encoding="utf-8"))
+        return str(manifest.get("version") or "?")
+    except (OSError, json.JSONDecodeError):
+        return "?"
+
+
 class State:
-    """Общее состояние между потоком опроса и иконкой/меню."""
+    """Общее состояние между потоком опроса и иконкой/меню/окном."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -248,6 +330,7 @@ class TrayApp:
         self.wake = threading.Event()
         self.stop_evt = threading.Event()
         self.icon: pystray.Icon | None = None
+        self._detail_win: Any = None
         self.current_cfg: dict[str, Any] = load_config()
 
     def tr(self, key: str) -> str:
@@ -339,7 +422,7 @@ class TrayApp:
             cfg = load_config()  # перечитываем — правки конфига подхватываются сами
             self.current_cfg = cfg
             if not cfg["apiKey"]:
-                self.state.set({"ok": False, "error": self.tr("no_key")})
+                self.state.set({"ok": False, "error": self.tr("no_key"), "ts": time.time()})
             else:
                 try:
                     data = fetch_quota(cfg["apiKey"], cfg["platform"])
@@ -353,7 +436,7 @@ class TrayApp:
                     )
                 except Exception as exc:
                     logger.exception("Опрос не удался")
-                    self.state.set({"ok": False, "error": str(exc)[:200]})
+                    self.state.set({"ok": False, "error": str(exc)[:200], "ts": time.time()})
             self.refresh_icon()
             self.wake.wait(cfg["intervalSec"])
             self.wake.clear()
@@ -367,15 +450,179 @@ class TrayApp:
         self.wake.set()
         icon.stop()
 
+    def toggle_autostart(self, icon: pystray.Icon, item: pystray.MenuItem) -> None:
+        enable = not is_autostart_on()
+        try:
+            set_autostart(enable)
+            if icon:
+                icon.notify(self.tr("auto_on") if enable else self.tr("auto_off"), APP_NAME)
+        except Exception as exc:
+            logger.exception("Не удалось изменить автозапуск")
+            if icon:
+                try:
+                    icon.notify(f"{self.tr('error')}: {exc}", APP_NAME)
+                except Exception:
+                    pass
+
+    def update_extension(self, icon: pystray.Icon, item: pystray.MenuItem) -> None:
+        """git pull репозитория; расширение само заметит новую версию и перезапустится."""
+        lang = self.current_cfg["lang"]
+        try:
+            proc = subprocess.run(
+                ["git", "-C", str(REPO_DIR), "pull", "--ff-only", "origin", "main"],
+                capture_output=True, text=True, timeout=60,
+                encoding="utf-8", errors="replace",
+            )
+            out = (proc.stdout or "") + (proc.stderr or "")
+            logger.info("git pull: %s", out.strip()[:300])
+            if proc.returncode != 0:
+                raise RuntimeError((out.strip() or "git failed")[:120])
+            changed = "fast-forward" in out.lower() or "files changed" in out.lower()
+            if icon:
+                icon.notify(self.tr("upd_done") if changed else self.tr("upd_none"), APP_NAME)
+        except Exception as exc:
+            logger.exception("Обновление расширения не удалось")
+            if icon:
+                try:
+                    icon.notify(STRINGS[lang]["upd_fail"].format(e=str(exc)[:80]), APP_NAME)
+                except Exception:
+                    pass
+
     def build_menu(self) -> pystray.Menu:
         return pystray.Menu(
             pystray.MenuItem(self.line_session, None, enabled=False),
             pystray.MenuItem(self.line_weekly, None, enabled=False),
             pystray.MenuItem(self.line_reset, None, enabled=False),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem(lambda item: self.tr("refresh"), self.on_refresh, default=True),
+            pystray.MenuItem(lambda item: self.tr("details"), self.open_details, default=True),
+            pystray.MenuItem(lambda item: self.tr("refresh"), self.on_refresh),
+            pystray.MenuItem(lambda item: self.tr("upd_ext"), self.update_extension),
+            pystray.MenuItem(
+                lambda item: self.tr("autostart"), self.toggle_autostart,
+                checked=lambda item: is_autostart_on(), radio=False,
+            ),
+            pystray.Menu.SEPARATOR,
             pystray.MenuItem(lambda item: self.tr("exit"), self.on_exit),
         )
+
+    # ── окно деталей (tkinter, свой поток) ───────────────────
+    def open_details(self, *args: Any) -> None:
+        win = self._detail_win
+        if win is not None:
+            try:
+                win.deiconify()
+                win.lift()
+                win.focus_force()
+                return
+            except Exception:
+                self._detail_win = None
+        threading.Thread(target=self._details_main, name="details", daemon=True).start()
+
+    def _details_main(self) -> None:
+        import tkinter as tk
+
+        c = {"bg": "#17181a", "card": "#1f2124", "text": "#e8e7e3",
+             "muted": "#8f9094", "border": "#2c2e32", "accent": "#7ea6c7"}
+        lang = self.current_cfg["lang"]
+        ext_version = read_repo_version()
+
+        win = tk.Tk()
+        win.title(f"{APP_NAME} v{ext_version}")
+        win.geometry("330x470")
+        win.resizable(False, False)
+        win.attributes("-topmost", True)
+        win.configure(bg=c["bg"])
+        self._detail_win = win
+
+        def on_close() -> None:
+            self._detail_win = None
+            win.destroy()
+
+        win.protocol("WM_DELETE_WINDOW", on_close)
+
+        tk.Label(win, text=f"{APP_NAME}  v{ext_version}", font=("Segoe UI", 13, "bold"),
+                 fg=c["text"], bg=c["bg"]).pack(anchor="w", padx=16, pady=(12, 0))
+        plan_lbl = tk.Label(win, text="", font=("Segoe UI", 9), fg=c["accent"], bg=c["bg"])
+        plan_lbl.pack(anchor="w", padx=16, pady=(0, 4))
+
+        blocks: dict[str, dict[str, Any]] = {}
+
+        def make_block(key: str, title: str) -> None:
+            wrap = tk.Frame(win, bg=c["card"], highlightthickness=1,
+                            highlightbackground=c["border"])
+            wrap.pack(fill="x", padx=16, pady=6)
+            tk.Label(wrap, text=title.upper(), font=("Segoe UI", 8),
+                     fg=c["muted"], bg=c["card"]).pack(anchor="w", padx=12, pady=(8, 0))
+            val = tk.Label(wrap, text="—", font=("Segoe UI", 24, "bold"),
+                           fg=c["text"], bg=c["card"])
+            val.pack(anchor="w", padx=12)
+            canvas = tk.Canvas(wrap, height=8, bg=c["card"], highlightthickness=0)
+            canvas.pack(fill="x", padx=12, pady=(4, 0))
+            meta = tk.Label(wrap, text="", font=("Segoe UI", 9),
+                            fg=c["muted"], bg=c["card"], wraplength=270, justify="left")
+            meta.pack(anchor="w", padx=12, pady=(2, 8))
+            blocks[key] = {"wrap": wrap, "val": val, "canvas": canvas, "meta": meta}
+
+        make_block("s", self.tr("session"))
+        make_block("w", self.tr("weekly"))
+
+        foot = tk.Label(win, text="", font=("Segoe UI", 9), fg=c["muted"],
+                        bg=c["bg"], wraplength=290, justify="left")
+        foot.pack(anchor="w", padx=16, pady=(4, 0))
+
+        tk.Button(win, text=self.tr("refresh"), command=self.wake.set,
+                  bg=c["card"], fg=c["text"], activebackground=c["border"],
+                  activeforeground=c["text"], relief="flat", padx=14, pady=4,
+                  cursor="hand2").pack(pady=(6, 12))
+
+        def draw_bar(canvas: Any, used: float, color: str) -> None:
+            canvas.delete("all")
+            width = max(canvas.winfo_width(), 100)
+            canvas.create_rectangle(0, 0, width, 8, fill=c["border"], width=0)
+            canvas.create_rectangle(0, 0, int(width * used / 100), 8, fill=color, width=0)
+
+        def tick() -> None:
+            if self._detail_win is not win:
+                return
+            try:
+                if not win.winfo_exists():
+                    return
+            except Exception:
+                return
+            d = self.state.snapshot()
+            ok = bool(d.get("ok"))
+            plan_text = str(d.get("plan") or "")
+            plan_lbl.config(text=f"{'Тариф' if lang == 'ru' else 'Plan'}: {plan_text}"
+                            if plan_text else "")
+            for key in ("s", "w"):
+                b = blocks[key]
+                win_d = d.get(key) if ok else None
+                if not win_d:
+                    b["val"].config(text="—", fg=c["muted"])
+                    b["meta"].config(text=str(d.get("error") or self.tr("no_data"))[:80])
+                    b["canvas"].delete("all")
+                    continue
+                used = float(win_d["used"])
+                b["val"].config(text=f"{100 - int(used)}%", fg=color_for(used))
+                b["meta"].config(text=(
+                    f"{self.tr('used')}: {int(used)}% · "
+                    f"{self.tr('reset')} {fmt_countdown(win_d['resets_at'], lang)} "
+                    f"({fmt_at_time(win_d['resets_at'])})"
+                ))
+                draw_bar(b["canvas"], used, color_for(used))
+            if ok:
+                mcp = d.get("mcp")
+                extra = f" · MCP: {100 - int(mcp['used'])}% {self.tr('left')}" if mcp else ""
+                ts = d.get("ts") or time.time()
+                host = HOSTS.get(d.get("platform"), "")
+                foot.config(text=f"{self.tr('updated_at')}: "
+                                 f"{time.strftime('%H:%M:%S', time.localtime(ts))} · {host}{extra}")
+            else:
+                foot.config(text=str(d.get("error") or "")[:90])
+            win.after(1000, tick)
+
+        tick()
+        win.mainloop()
 
     def run(self) -> None:
         worker = threading.Thread(target=self.poll_worker, name="poll", daemon=True)
@@ -395,6 +642,8 @@ def selftest() -> int:
     cfg = load_config()
     logger.info("Selftest: конфиг — ключ %s, платформа %s, интервал %sс",
                 "задан" if cfg["apiKey"] else "НЕ задан", cfg["platform"], cfg["intervalSec"])
+    logger.info("Selftest: автозапуск %s, версия расширения в репо %s",
+                "вкл" if is_autostart_on() else "выкл", read_repo_version())
     if cfg["apiKey"]:
         data = fetch_quota(cfg["apiKey"], cfg["platform"])
         windows = [k for k in ("s", "w", "mcp") if data.get(k)]

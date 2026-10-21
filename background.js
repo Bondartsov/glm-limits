@@ -90,8 +90,25 @@ function normalizeWindow(item) {
   return { utilization: Math.min(Math.max(pct, 0), 100), resetsAt };
 }
 
+// Self-update for the unpacked flow: after `git pull` the manifest on disk
+// already has the new version, while the loaded one stays old. Unpacked
+// extension files are served live from disk, so fetching our own manifest
+// detects the change — then we reload ourselves. No-op for packed builds.
+async function checkForUpdate() {
+  try {
+    const r = await fetch(chrome.runtime.getURL("manifest.json"), { cache: "no-store" });
+    const disk = await r.json();
+    const loaded = chrome.runtime.getManifest();
+    if (disk && disk.version && loaded && disk.version !== loaded.version) {
+      console.info("[GLM Limits] new version on disk:", disk.version, "- reloading");
+      chrome.runtime.reload();
+    }
+  } catch (e) { /* best-effort */ }
+}
+
 async function poll() {
   try {
+    await checkForUpdate();
     const st = await getSettings();
     if (!st.apiKey || !st.apiKey.trim()) {
       await chrome.storage.local.set({ latest: { ok: false, error: "No API key. Set it in settings.", ts: Date.now() } });
