@@ -25,7 +25,7 @@ async function getSettings() {
   // Flat keys — must match popup.js loadSettings/saveSettings.
   const r = await chrome.storage.local.get([
     "apiKey", "platform", "intervalSec", "viewMode", "lang", "notify",
-    "badge", "badgeMetric"
+    "badge", "badgeMetric", "badgeMode"
   ]);
   return {
     apiKey: r.apiKey || DEFAULTS.apiKey,
@@ -36,6 +36,7 @@ async function getSettings() {
     notify: r.notify !== false,
     badge: r.badge !== false,
     badgeMetric: r.badgeMetric === "w" ? "w" : "s",
+    badgeMode: r.badgeMode === "used" ? "used" : "remaining",
   };
 }
 
@@ -237,9 +238,12 @@ async function updateBadge(st, fiveHour, sevenDay) {
       return;
     }
     const used = Math.max(0, Math.min(100, Math.round(win.utilization)));
+    // badgeMode: "remaining" (default) shows what is left, "used" shows spend.
+    // Color always follows the spend level — danger does not depend on wording.
+    const shown = st.badgeMode === "used" ? used : 100 - used;
     await chrome.action.setBadgeBackgroundColor({ color: badgeColor(used) });
     try { await chrome.action.setBadgeTextColor({ color: "#ffffff" }); } catch (e) {}
-    await chrome.action.setBadgeText({ text: String(used) });
+    await chrome.action.setBadgeText({ text: String(shown) });
   } catch (e) {}
 }
 
