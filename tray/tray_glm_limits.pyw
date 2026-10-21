@@ -71,6 +71,13 @@ STRINGS = {
         "upd_none": "Уже последняя версия.",
         "upd_fail": "Ошибка обновления: {e}",
         "auto_on": "Автозапуск включён", "auto_off": "Автозапуск выключен",
+        "key_menu": "API-ключ…",
+        "key_prompt": "Новый API-ключ (ввод скрыт):",
+        "key_current_set": "Сейчас: задан (••••{tail})",
+        "key_current_none": "Сейчас: не задан",
+        "key_saved": "Ключ сохранён — опрашиваю с новым ключом",
+        "key_empty": "Поле пустое — ключ остался прежним",
+        "save_btn": "Сохранить", "cancel_btn": "Отмена",
         "notify": "Сессия израсходована на {u}%. Осталось {l}%.",
         "no_key": "Ключ не задан (tray_config.json)",
         "updated_at": "Обновлено",
@@ -87,6 +94,13 @@ STRINGS = {
         "upd_none": "Already up to date.",
         "upd_fail": "Update failed: {e}",
         "auto_on": "Autostart enabled", "auto_off": "Autostart disabled",
+        "key_menu": "API key…",
+        "key_prompt": "New API key (input hidden):",
+        "key_current_set": "Current: set (••••{tail})",
+        "key_current_none": "Current: not set",
+        "key_saved": "Key saved — polling with the new key",
+        "key_empty": "Empty field — key unchanged",
+        "save_btn": "Save", "cancel_btn": "Cancel",
         "notify": "Session is {u}% used. {l}% left.",
         "no_key": "API key is not set (tray_config.json)",
         "updated_at": "Updated",
@@ -331,6 +345,7 @@ class TrayApp:
         self.stop_evt = threading.Event()
         self.icon: pystray.Icon | None = None
         self._detail_win: Any = None
+        self._key_win: Any = None
         self.current_cfg: dict[str, Any] = load_config()
 
     def tr(self, key: str) -> str:
@@ -488,6 +503,89 @@ class TrayApp:
                 except Exception:
                     pass
 
+    def _notify_tray(self, text: str) -> None:
+        if self.icon:
+            try:
+                self.icon.notify(text, APP_NAME)
+            except Exception:
+                logger.exception("Не удалось показать уведомление")
+
+    def open_key_dialog(self, *args: Any) -> None:
+        """Ввод API-ключа мышкой: tkinter-диалог с маскировкой звёздочками."""
+        threading.Thread(target=self._key_dialog_main, name="key-dialog", daemon=True).start()
+
+    def _key_dialog_main(self) -> None:
+        import tkinter as tk
+
+        lang = self.current_cfg["lang"]
+        s = STRINGS[lang]
+        current = load_config()["apiKey"]
+
+        win = tk.Tk()
+        win.title(APP_NAME)
+        win.geometry("340x200")
+        win.resizable(False, False)
+        win.attributes("-topmost", True)
+        win.configure(bg="#17181a")
+        self._key_win = win
+
+        def on_close() -> None:
+            self._key_win = None
+            win.destroy()
+
+        win.protocol("WM_DELETE_WINDOW", on_close)
+
+        tk.Label(win, text=s["key_prompt"], font=("Segoe UI", 10),
+                 fg="#e8e7e3", bg="#17181a").pack(anchor="w", padx=16, pady=(14, 4))
+        entry = tk.Entry(win, show="*", font=("Segoe UI", 11), bg="#1f2124",
+                         fg="#e8e7e3", insertbackground="#e8e7e3", relief="flat")
+        entry.pack(fill="x", padx=16, ipady=6)
+        entry.focus_set()
+
+        if current:
+            tail = current[-4:] if len(current) >= 4 else current
+            status_text = s["key_current_set"].format(tail=tail)
+        else:
+            status_text = s["key_current_none"]
+        tk.Label(win, text=status_text, font=("Segoe UI", 9),
+                 fg="#8f9094", bg="#17181a").pack(anchor="w", padx=16, pady=(5, 0))
+
+        def save() -> None:
+            new_key = entry.get().strip()
+            if not new_key:
+                self._notify_tray(s["key_empty"])
+                on_close()
+                return
+            try:
+                data = json.loads(CONFIG_PATH.read_text(encoding="utf-8")) \
+                    if CONFIG_PATH.exists() else {}
+            except (OSError, json.JSONDecodeError):
+                data = {}
+            data["apiKey"] = new_key
+            try:
+                CONFIG_PATH.write_text(
+                    json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+                )
+                logger.info("API-ключ обновлён через диалог трея")
+                self._notify_tray(s["key_saved"])
+                self.wake.set()  # сразу опросить с новым ключом
+            except OSError:
+                logger.exception("Не удалось записать конфиг")
+                self._notify_tray(f"{s['error']}: {CONFIG_PATH.name}")
+            on_close()
+
+        row = tk.Frame(win, bg="#17181a")
+        row.pack(pady=(14, 8))
+        tk.Button(row, text=s["save_btn"], command=save, bg="#1f2124", fg="#e8e7e3",
+                  activebackground="#2c2e32", activeforeground="#e8e7e3",
+                  relief="flat", padx=14, pady=3, cursor="hand2").pack(side="left", padx=6)
+        tk.Button(row, text=s["cancel_btn"], command=on_close, bg="#1f2124", fg="#8f9094",
+                  activebackground="#2c2e32", activeforeground="#e8e7e3",
+                  relief="flat", padx=14, pady=3, cursor="hand2").pack(side="left", padx=6)
+        win.bind("<Return>", lambda event: save())
+        win.bind("<Escape>", lambda event: on_close())
+        win.mainloop()
+
     def build_menu(self) -> pystray.Menu:
         return pystray.Menu(
             pystray.MenuItem(self.line_session, None, enabled=False),
@@ -497,6 +595,7 @@ class TrayApp:
             pystray.MenuItem(lambda item: self.tr("details"), self.open_details, default=True),
             pystray.MenuItem(lambda item: self.tr("refresh"), self.on_refresh),
             pystray.MenuItem(lambda item: self.tr("upd_ext"), self.update_extension),
+            pystray.MenuItem(lambda item: self.tr("key_menu"), self.open_key_dialog),
             pystray.MenuItem(
                 lambda item: self.tr("autostart"), self.toggle_autostart,
                 checked=lambda item: is_autostart_on(), radio=False,

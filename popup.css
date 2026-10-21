@@ -43,6 +43,8 @@ body {
   background: var(--bg);
   color: var(--text);
   width: 360px;
+  max-height: 600px;
+  overflow-y: auto;
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
 }

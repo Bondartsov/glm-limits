@@ -411,7 +411,10 @@ function toggleCompact() {
 
 function toggleSettings() {
   const panel = $("settingsPanel");
-  panel.style.display = panel.style.display === "none" ? "" : "none";
+  const opening = panel.style.display === "none";
+  panel.style.display = opening ? "" : "none";
+  // The panel sits below the metrics — bring it into view when opened.
+  if (opening) panel.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 // The "which metric"/"show as" selects only make sense when the badge is on.
