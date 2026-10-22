@@ -36,10 +36,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import pystray
-import requests
-from PIL import Image, ImageDraw, ImageFont
-
 APP_NAME = "GLM Limits"
 HOSTS = {"cn": "https://open.bigmodel.cn", "intl": "https://api.z.ai"}
 QUOTA_PATH = "/api/monitor/usage/quota/limit"
@@ -55,6 +51,30 @@ BASE_DIR = Path(__file__).resolve().parent
 REPO_DIR = BASE_DIR.parent          # корень репозитория (для git pull)
 CONFIG_PATH = BASE_DIR / "tray_config.json"
 LOG_PATH = BASE_DIR / "tray_app.log"
+
+# Третьесторонние зависимости импортируются под защитой: .pyw работает без
+# консоли, и падение на импорте выглядело бы как «не запускается» — молча.
+# Причина пишется в лог, чтобы её можно было прочитать.
+_IMPORT_ERROR: Exception | None = None
+try:
+    import pystray
+    import requests
+    from PIL import Image, ImageDraw, ImageFont
+except Exception as exc:  # noqa: BLE001 — ловим всё, чтобы записать в лог
+    _IMPORT_ERROR = exc
+    pystray = None  # type: ignore[assignment]
+    requests = None  # type: ignore[assignment]
+    Image = ImageDraw = ImageFont = None  # type: ignore[assignment]
+    try:
+        with open(LOG_PATH, "a", encoding="utf-8") as fh:
+            fh.write(f"{datetime.now().isoformat(timespec='seconds')} "
+                     f"CRITICAL ошибка импорта зависимостей: {exc}\n")
+    except OSError:
+        pass
+
+# Пороги уведомлений о расходе сессии (по возрастанию) — по одному уведомлению
+# на порог в пределах одного окна сброса.
+NOTIFY_THRESHOLDS = (80, 90, 100)
 
 logger = logging.getLogger("glm-limits.tray")
 
@@ -343,7 +363,7 @@ class State:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._data: dict[str, Any] = {"ok": False, "error": None}
-        self.notif: dict[str, Any] = {"win": None, "s80": False, "s90": False}
+        self.notif: dict[str, Any] = {"win": None, "s80": False, "s90": False, "s100": False}
 
     def set(self, data: dict[str, Any]) -> None:
         with self._lock:
@@ -427,6 +447,7 @@ class TrayApp:
 
     # ── уведомления 80/90% ───────────────────────────────────
     def check_notifications(self, cfg: dict[str, Any], data: dict[str, Any]) -> None:
+        """По одному уведомлению на порог (80/90/100) в пределах окна сброса."""
         s = data.get("s")
         if not cfg["notify"] or not s:
             return
@@ -434,23 +455,23 @@ class TrayApp:
         win = s.get("resets_at")
         n = self.state.notif
         if n["win"] != win:
-            n["win"], n["s80"], n["s90"] = win, False, False
-        if used < 70:
-            n["s80"] = n["s90"] = False
-            return
-        fired = False
-        if used >= 90 and not n["s90"]:
-            n["s90"] = n["s80"] = True
-            fired = True
-        elif used >= 80 and not n["s80"]:
-            n["s80"] = True
-            fired = True
-        if fired and self.icon:
-            msg = STRINGS[cfg["lang"]]["notify"].format(u=int(used), l=int(100 - used))
-            try:
-                self.icon.notify(msg, APP_NAME)
-            except Exception:
-                logger.exception("Не удалось показать уведомление")
+            n["win"] = win
+            for th in NOTIFY_THRESHOLDS:
+                n[f"s{th}"] = False
+        for th in NOTIFY_THRESHOLDS:
+            if used >= th and not n.get(f"s{th}"):
+                # Порог пройден — нижние считаем пройденными тоже: одно
+                # уведомление вместо каскада, без дублей.
+                for lower in NOTIFY_THRESHOLDS:
+                    if lower <= th:
+                        n[f"s{lower}"] = True
+                if self.icon:
+                    msg = STRINGS[cfg["lang"]]["notify"].format(u=int(used), l=int(100 - used))
+                    try:
+                        self.icon.notify(msg, APP_NAME)
+                    except Exception:
+                        logger.exception("Не удалось показать уведомление")
+                break
 
     # ── поток опроса ─────────────────────────────────────────
     def poll_worker(self) -> None:
@@ -482,6 +503,7 @@ class TrayApp:
         self.wake.set()
 
     def on_exit(self, icon: pystray.Icon, item: pystray.MenuItem) -> None:
+        logger.info("Выход по команде пользователя")
         self.stop_evt.set()
         self.wake.set()
         icon.stop()
@@ -799,6 +821,9 @@ class TrayApp:
 
 def selftest() -> int:
     """Проверка окружения без запуска трея: рендер, конфиг, (если ключ есть) API."""
+    if _IMPORT_ERROR is not None:
+        print(f"IMPORT ERROR: {_IMPORT_ERROR}")
+        return 1
     for args in ((None, COLOR_GRAY), (62, COLOR_GREEN), (5, COLOR_YELLOW), (100, COLOR_RED)):
         img = render_icon(*args)
         assert img.size == (64, 64), f"icon size {img.size}"
@@ -817,6 +842,12 @@ def selftest() -> int:
 
 def main(argv: list[str]) -> int:
     setup_logging()
+    if _IMPORT_ERROR is not None:
+        msg = (f"Не хватает зависимостей: {_IMPORT_ERROR}. "
+               "Установи их: pip install -r tray/requirements.txt (или запусти tray_install.bat)")
+        logger.error(msg)
+        print(msg)
+        return 1
     if "--selftest" in argv:
         return selftest()
 

@@ -19,7 +19,9 @@ const HISTORY_STEP_MS = 5 * 60 * 1000;
 const HISTORY_MAX_POINTS = 800;
 
 // Session usage thresholds for one-shot notifications, highest first.
+// One notification per threshold per reset window — no per-percent spam.
 const NOTIFY_THRESHOLDS = [
+  { at: 100, flag: "s100" },
   { at: 90, flag: "s90" },
   { at: 80, flag: "s80" },
 ];
@@ -247,12 +249,17 @@ async function maybeNotify(st, fiveHour) {
   const winKey = fiveHour.resetsAt || "unknown";
   const stg = await chrome.storage.local.get("notifState");
   let ns = stg.notifState;
-  if (!ns || ns.winKey !== winKey) ns = { winKey, s80: false, s90: false };
-  if (used < 70) { ns.s80 = false; ns.s90 = false; }
+  if (!ns || ns.winKey !== winKey) {
+    ns = { winKey, s80: false, s90: false, s100: false };
+  }
   for (const th of NOTIFY_THRESHOLDS) {
     if (used >= th.at && !ns[th.flag]) {
       ns[th.flag] = true;
-      if (th.flag === "s90") ns.s80 = true; // jumping straight past 80% covers both
+      // Порог пройден — нижние считаем пройденными тоже: одно уведомление
+      // вместо каскада 80 → 90 → 100.
+      for (const other of NOTIFY_THRESHOLDS) {
+        if (other.at <= th.at) ns[other.flag] = true;
+      }
       fireNotification(st.lang, used, th.at);
       break; // at most one notification per poll
     }
