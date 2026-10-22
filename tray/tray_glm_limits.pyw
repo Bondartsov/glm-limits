@@ -1088,7 +1088,7 @@ class TrayApp:
         upd_time = repo_update_time()
 
         win = tk.Toplevel(self._root)
-        win.title(f"{APP_NAME} v{ext_version}")
+        win.title(APP_NAME)
         win.geometry("330x360")   # стартовый размер, дальше подгоняем под контент
         win.resizable(True, True)
         win.attributes("-topmost", True)
@@ -1147,11 +1147,13 @@ class TrayApp:
         # Подвал: хост, время данных и кнопка обновления
         foot = tk.Frame(win, bg=c["bg"])
         foot.pack(fill="x", padx=16, pady=(12, 12))
-        foot_lbl = tk.Label(foot, text="", font=("Segoe UI", 9), fg=c["muted"], bg=c["bg"])
-        foot_lbl.pack(side="left")
+        # Кнопку пакуем ПЕРВОЙ, иначе длинный текст выдавливает её за край.
         tk.Button(foot, text="⟳", command=self.wake.set, bg=c["card"], fg=c["text"],
                   activebackground=c["line"], activeforeground=c["text"], relief="flat",
                   width=3, cursor="hand2").pack(side="right")
+        foot_lbl = tk.Label(foot, text="", font=("Segoe UI", 9), fg=c["muted"],
+                            bg=c["bg"], anchor="w")
+        foot_lbl.pack(side="left", fill="x", expand=True)
 
         def color_for_used(used: float) -> str:
             if used < 50:
@@ -1221,8 +1223,12 @@ class TrayApp:
             draw_chart()
             ts = d.get("ts")
             host = HOSTS.get(d.get("platform"), "")
-            foot_lbl.config(text=(f"{time.strftime('%H:%M:%S', time.localtime(ts))} · {host}"
-                                  if ts else ""))
+            # Только хост (без https://) и короткое время — иначе строка
+            # не помещается в окно.
+            short_host = host.replace("https://", "").replace("http://", "")
+            label = (f"{time.strftime('%H:%M', time.localtime(ts))} · {short_host}"
+                     if ts else "")
+            foot_lbl.config(text=label[:42])
             win.after(1000, tick)
 
         # Подгоняем окно под реальный размер содержимого (с учётом шрифтов
