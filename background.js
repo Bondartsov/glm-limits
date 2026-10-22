@@ -3,7 +3,7 @@
 // keeps a usage history for the sparkline and fires one-shot 80/90% session notifications.
 // Settings: platform (auto-detected from the key), poll interval, view mode, notifications.
 
-const DEFAULTS = { intervalSec: 120, viewMode: "popup", platform: "auto", notify: true };
+const DEFAULTS = { apiKey: "", intervalSec: 120, viewMode: "popup", platform: "auto", notify: true };
 const VIEW_MODES = ["popup", "window", "compact"];
 const PLATFORMS = ["auto", "cn", "intl"];
 
@@ -17,6 +17,17 @@ const RAW_MANIFEST_URL = "https://raw.githubusercontent.com/Bondartsov/glm-limit
 // Sparkline history: one point per 5 minutes is enough, capped to stay small.
 const HISTORY_STEP_MS = 5 * 60 * 1000;
 const HISTORY_MAX_POINTS = 800;
+
+// How often we may ask GitHub for the upstream version (network call).
+const UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000;
+
+// Timeout for the quota request — a hanging fetch would keep the SW alive
+// until Chrome kills it, and the popup would wait forever.
+const API_TIMEOUT_MS = 15000;
+
+// Protects against overlapping polls (alarm + manual "poll" message +
+// onInstalled/onStartup all can fire at once).
+let pollInFlight = false;
 
 // Session usage thresholds for one-shot notifications, highest first.
 // One notification per threshold per reset window — no per-percent spam.
@@ -71,16 +82,23 @@ function detectPlatform(key) {
 }
 
 async function getJSON(url, apiKey) {
-  const r = await fetch(url, {
-    headers: {
-      // GLM monitor API expects the raw key — NO "Bearer" prefix.
-      "Authorization": apiKey,
-      "Accept": "application/json",
-      "Content-Type": "application/json",
-    },
-  });
-  if (!r.ok) throw new Error(url + " -> " + r.status);
-  return r.json();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+  try {
+    const r = await fetch(url, {
+      headers: {
+        // GLM monitor API expects the raw key — NO "Bearer" prefix.
+        "Authorization": apiKey,
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+      },
+      signal: controller.signal,
+    });
+    if (!r.ok) throw new Error(url + " -> " + r.status);
+    return await r.json();
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // Parse one limit entry into { utilization (0-100), resetsAt (ISO) }.
@@ -123,8 +141,12 @@ async function checkForUpdate(st) {
     }
   } catch (e) { /* best-effort */ }
 
+  // Сетевая проверка GitHub — не чаще раза в 30 минут, иначе это ~720
+  // запросов в сутки на пустом месте.
   try {
-    const store = await chrome.storage.local.get("updNotified");
+    const store = await chrome.storage.local.get(["updNotified", "lastUpdateCheck"]);
+    if (Date.now() - (store.lastUpdateCheck || 0) < UPDATE_CHECK_INTERVAL_MS) return;
+    await chrome.storage.local.set({ lastUpdateCheck: Date.now() });
     const r = await fetch(RAW_MANIFEST_URL, { cache: "no-store" });
     if (!r.ok) return;
     const remote = await r.json();
@@ -145,6 +167,13 @@ async function checkForUpdate(st) {
 }
 
 async function poll() {
+  // Параллельные опросы (alarm + ручное сообщение) не нужны и могут
+  // портить историю/флаги уведомлений из-за read-modify-write.
+  if (pollInFlight) {
+    const cached = await chrome.storage.local.get("latest");
+    return cached.latest || null;   // отдаём кэш, а не ошибку
+  }
+  pollInFlight = true;
   try {
     const st = await getSettings();
     await checkForUpdate(st);
@@ -193,12 +222,26 @@ async function poll() {
       }
     }
 
-    await appendHistory(
-      fiveHour ? fiveHour.utilization : null,
-      sevenDay ? sevenDay.utilization : null
-    );
-    await maybeNotify(st, fiveHour);
-    await updateBadge(st, fiveHour, sevenDay);
+    // Побочные эффекты изолируем: сбой истории/уведомления/бейджа не должен
+    // мешать обновить основной кэш latest.
+    try {
+      await appendHistory(
+        fiveHour ? fiveHour.utilization : null,
+        sevenDay ? sevenDay.utilization : null
+      );
+    } catch (e) {
+      console.warn("[GLM Limits] history update failed:", e);
+    }
+    try {
+      await maybeNotify(st, fiveHour);
+    } catch (e) {
+      console.warn("[GLM Limits] notification failed:", e);
+    }
+    try {
+      await updateBadge(st, fiveHour, sevenDay);
+    } catch (e) {
+      console.warn("[GLM Limits] badge update failed:", e);
+    }
 
     // Store full window objects — popup reads { utilization, resetsAt }.
     const latest = {
@@ -217,6 +260,8 @@ async function poll() {
   } catch (e) {
     await chrome.storage.local.set({ latest: { ok: false, error: String(e), ts: Date.now() } });
     throw e;
+  } finally {
+    pollInFlight = false;
   }
 }
 
@@ -240,13 +285,16 @@ async function appendHistory(sUtil, wUtil) {
   } catch (e) {}
 }
 
-// One-shot notifications when session usage crosses 80% / 90%.
-// Flags are scoped to the window (resetsAt) and re-armed only below 70%,
-// so hovering around a threshold does not re-notify.
+// One-shot notifications when session usage crosses 80% / 90% / 100%.
+// Flags are scoped to the reset window (resetsAt): внутри одного окна каждый
+// порог срабатывает ровно один раз, поэтому 81%, 82%, 83%... не спамят.
 async function maybeNotify(st, fiveHour) {
   if (!st.notify || !fiveHour || typeof fiveHour.utilization !== "number") return;
   const used = fiveHour.utilization;
-  const winKey = fiveHour.resetsAt || "unknown";
+  // Ключ окна: время сброса, а при его отсутствии — пятичасовой слот,
+  // иначе флаги залипнут навсегда на одном "unknown".
+  const winKey = fiveHour.resetsAt ||
+    ("slot:" + Math.floor(Date.now() / (5 * 3600 * 1000)));
   const stg = await chrome.storage.local.get("notifState");
   let ns = stg.notifState;
   if (!ns || ns.winKey !== winKey) {

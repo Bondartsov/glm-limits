@@ -51,6 +51,7 @@ BASE_DIR = Path(__file__).resolve().parent
 REPO_DIR = BASE_DIR.parent          # корень репозитория (для git pull)
 CONFIG_PATH = BASE_DIR / "tray_config.json"
 LOG_PATH = BASE_DIR / "tray_app.log"
+STATE_PATH = BASE_DIR / "tray_state.json"   # флаги уведомлений (в git не попадает)
 
 # Третьесторонние зависимости импортируются под защитой: .pyw работает без
 # консоли, и падение на импорте выглядело бы как «не запускается» — молча.
@@ -339,6 +340,48 @@ def set_autostart(enable: bool) -> None:
                 pass
 
 
+def acquire_single_instance() -> bool:
+    """True, если этот процесс — единственный экземпляр трея (Windows mutex).
+
+    Без этого двойной клик по .pyw даёт две иконки и два параллельных опроса.
+    """
+    try:
+        import ctypes
+        from ctypes import wintypes
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateMutexW.restype = wintypes.HANDLE
+        handle = kernel32.CreateMutexW(None, False, "Global\\GLMLimitsTray")
+        if not handle:
+            return True
+        if ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS
+            kernel32.CloseHandle(handle)
+            return False
+        # Хэндл намеренно не закрываем — он держится до конца процесса.
+        return True
+    except Exception:
+        logger.exception("Не удалось проверить единственный экземпляр")
+        return True
+
+
+def load_notif_state() -> dict[str, Any]:
+    """Флаги уведомлений переживают перезапуск трея (иначе 80% прилетит дважды)."""
+    try:
+        if STATE_PATH.exists():
+            data = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
+    except (OSError, json.JSONDecodeError):
+        logger.exception("Не удалось прочитать состояние уведомлений")
+    return {}
+
+
+def save_notif_state(state: dict[str, Any]) -> None:
+    try:
+        STATE_PATH.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        logger.exception("Не удалось сохранить состояние уведомлений")
+
+
 def read_repo_version() -> str:
     """Версия расширения из манифеста репозитория (для окна деталей)."""
     try:
@@ -383,6 +426,9 @@ class TrayApp:
         self._detail_win: Any = None
         self._key_win: Any = None
         self.current_cfg: dict[str, Any] = load_config()
+        # Флаги уведомлений живут на диске: перезапуск трея не должен приводить
+        # к повторному «80%» в том же окне сброса.
+        self.state.notif.update(load_notif_state())
 
     def tr(self, key: str) -> str:
         return STRINGS[self.current_cfg["lang"]][key]
@@ -471,31 +517,38 @@ class TrayApp:
                         self.icon.notify(msg, APP_NAME)
                     except Exception:
                         logger.exception("Не удалось показать уведомление")
+                save_notif_state(n)
                 break
 
     # ── поток опроса ─────────────────────────────────────────
     def poll_worker(self) -> None:
         while not self.stop_evt.is_set():
-            cfg = load_config()  # перечитываем — правки конфига подхватываются сами
-            self.current_cfg = cfg
-            if not cfg["apiKey"]:
-                self.state.set({"ok": False, "error": self.tr("no_key"), "ts": time.time()})
-            else:
-                try:
-                    data = fetch_quota(cfg["apiKey"], cfg["platform"])
-                    self.state.set(data)
-                    self.check_notifications(cfg, data)
-                    logger.info(
-                        "Опрос ок (platform=%s): сессия %s%%, неделя %s%%",
-                        data.get("platform"),
-                        int(data["s"]["used"]) if data.get("s") else -1,
-                        int(data["w"]["used"]) if data.get("w") else -1,
-                    )
-                except Exception as exc:
-                    logger.exception("Опрос не удался")
-                    self.state.set({"ok": False, "error": str(exc)[:200], "ts": time.time()})
-            self.refresh_icon()
-            self.wake.wait(cfg["intervalSec"])
+            interval = 120
+            try:
+                cfg = load_config()  # перечитываем — правки конфига подхватываются сами
+                interval = cfg["intervalSec"]
+                self.current_cfg = cfg
+                if not cfg["apiKey"]:
+                    self.state.set({"ok": False, "error": self.tr("no_key"), "ts": time.time()})
+                else:
+                    try:
+                        data = fetch_quota(cfg["apiKey"], cfg["platform"])
+                        self.state.set(data)
+                        self.check_notifications(cfg, data)
+                        logger.info(
+                            "Опрос ок (platform=%s): сессия %s%%, неделя %s%%",
+                            data.get("platform"),
+                            int(data["s"]["used"]) if data.get("s") else -1,
+                            int(data["w"]["used"]) if data.get("w") else -1,
+                        )
+                    except Exception as exc:
+                        logger.exception("Опрос не удался")
+                        self.state.set({"ok": False, "error": str(exc)[:200], "ts": time.time()})
+                self.refresh_icon()
+            except Exception:
+                # Поток опроса не должен умирать: иначе иконка застынет навсегда.
+                logger.exception("Неожиданная ошибка в цикле опроса — продолжаем")
+            self.wake.wait(interval)
             self.wake.clear()
 
     # ── действия меню ────────────────────────────────────────
@@ -523,36 +576,70 @@ class TrayApp:
                     pass
 
     def update_extension(self, icon: pystray.Icon, item: pystray.MenuItem) -> None:
-        """git pull репозитория; расширение само заметит новую версию и перезапустится."""
+        """git pull в фоновом потоке: блокировка на минуту недопустима —
+        pystray крутит меню в этом же потоке."""
+        threading.Thread(target=self._update_extension_worker, name="git-pull",
+                         daemon=True).start()
+
+    def _update_extension_worker(self) -> None:
         lang = self.current_cfg["lang"]
         try:
+            before = self._git_head()
             proc = subprocess.run(
                 ["git", "-C", str(REPO_DIR), "pull", "--ff-only", "origin", "main"],
-                capture_output=True, text=True, timeout=60,
+                capture_output=True, text=True, timeout=120,
                 encoding="utf-8", errors="replace",
             )
             out = (proc.stdout or "") + (proc.stderr or "")
             logger.info("git pull: %s", out.strip()[:300])
             if proc.returncode != 0:
                 raise RuntimeError((out.strip() or "git failed")[:120])
-            changed = "fast-forward" in out.lower() or "files changed" in out.lower()
-            if not changed:
-                if icon:
-                    icon.notify(self.tr("upd_none"), APP_NAME)
+            after = self._git_head()
+            # Сравниваем SHA, а не текст вывода: текст git локализован.
+            if not after or before == after:
+                self._notify_tray(self.tr("upd_none"))
                 return
-            if "tray/" in out.lower():
-                # Обновились файлы самого трея — текущий процесс со старым кодом:
-                # перезапускаем себя, чтобы новый код заработал сразу.
+            if self._git_touched_tray(before, after):
+                # Обновились файлы самого трея — текущий процесс со старым
+                # кодом: перезапускаем себя, чтобы новый код заработал сразу.
                 self.restart_self(self.tr("tray_restarting"))
-            elif icon:
-                icon.notify(self.tr("upd_done"), APP_NAME)
+            else:
+                self._notify_tray(self.tr("upd_done"))
         except Exception as exc:
             logger.exception("Обновление расширения не удалось")
-            if icon:
-                try:
-                    icon.notify(STRINGS[lang]["upd_fail"].format(e=str(exc)[:80]), APP_NAME)
-                except Exception:
-                    pass
+            self._notify_tray(STRINGS[lang]["upd_fail"].format(e=str(exc)[:80]))
+
+    @staticmethod
+    def _git_head() -> str | None:
+        try:
+            proc = subprocess.run(
+                ["git", "-C", str(REPO_DIR), "rev-parse", "HEAD"],
+                capture_output=True, text=True, timeout=15,
+                encoding="utf-8", errors="replace",
+            )
+            return proc.stdout.strip() if proc.returncode == 0 else None
+        except Exception:
+            logger.exception("git rev-parse не удался")
+            return None
+
+    @staticmethod
+    def _git_touched_tray(before: str | None, after: str | None) -> bool:
+        """Изменились ли файлы трея между двумя коммитами."""
+        if not before or not after:
+            return False
+        try:
+            proc = subprocess.run(
+                ["git", "-C", str(REPO_DIR), "diff", "--name-only", before, after],
+                capture_output=True, text=True, timeout=15,
+                encoding="utf-8", errors="replace",
+            )
+            if proc.returncode != 0:
+                return False
+            return any(line.strip().startswith("tray/")
+                       for line in proc.stdout.splitlines())
+        except Exception:
+            logger.exception("git diff не удался")
+            return False
 
     def _notify_tray(self, text: str) -> None:
         if self.icon:
@@ -646,9 +733,14 @@ class TrayApp:
             try:
                 flags = (getattr(subprocess, "DETACHED_PROCESS", 0)
                          | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = 0  # SW_HIDE — без мигающего окна консоли
+                # Запускаем через pythonw: даже если трей был стартован из
+                # консоли, новая копия не должна открывать окно консоли.
                 subprocess.Popen(
-                    [sys.executable, str(Path(__file__).resolve())],
-                    creationflags=flags, close_fds=True,
+                    [_pythonw_path(), str(Path(__file__).resolve())],
+                    creationflags=flags, startupinfo=startupinfo, close_fds=True,
                 )
                 logger.info("Новый процесс трея запущен, текущий завершается")
             except Exception:
@@ -807,7 +899,12 @@ class TrayApp:
             win.after(1000, tick)
 
         tick()
-        win.mainloop()
+        try:
+            win.mainloop()
+        except Exception:
+            logger.exception("Окно деталей завершилось с ошибкой")
+        finally:
+            self._detail_win = None
 
     def run(self) -> None:
         worker = threading.Thread(target=self.poll_worker, name="poll", daemon=True)
@@ -866,6 +963,12 @@ def main(argv: list[str]) -> int:
         logger.error(msg)
         print(msg)
         return 1
+
+    if not acquire_single_instance():
+        msg = "GLM Limits уже запущен — второй экземпляр закрыт."
+        logger.info(msg)
+        print(msg)
+        return 0
 
     TrayApp().run()
     return 0

@@ -76,6 +76,7 @@ let currentSettings = {};
 let latestData = null;
 let tickTimer = null;
 let historyData = [];
+let lastUpdateInfo = null;   // кэш lastUpdate — читаем из storage не каждый кадр
 
 // ── Helpers ──────────────────────────────────────────────
 function t(key) {
@@ -153,7 +154,8 @@ function windowSeries(kind, resetsAt) {
   const startTs = resetsAt ? resetsAt - len : Date.now() - len;
   return historyData
     .filter(p => p && p.ts >= startTs && typeof p[kind] === "number")
-    .map(p => ({ ts: p.ts, v: p[kind] }));
+    .map(p => ({ ts: p.ts, v: p[kind] }))
+    .sort((a, b) => a.ts - b.ts);   // на случай неупорядоченной истории
 }
 
 function renderSparkline(el, pts) {
@@ -172,10 +174,22 @@ function renderSparkline(el, pts) {
   }
   const area = d + " L" + x(t1).toFixed(1) + " " + (H - PAD) + " L" + x(t0).toFixed(1) + " " + (H - PAD) + " Z";
   const color = levelColor(clean[clean.length - 1].v);
-  // CSS vars in levelColor() only work via style=, not presentation attributes.
-  el.innerHTML =
-    '<path d="' + area + '" style="fill:' + color + ';stroke:none" opacity="0.12"></path>' +
-    '<path d="' + d + '" style="fill:none;stroke:' + color + '" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round"></path>';
+  // Собираем SVG через DOM API, а не innerHTML: данные приходят из storage.
+  const NS = "http://www.w3.org/2000/svg";
+  while (el.firstChild) el.removeChild(el.firstChild);
+  const areaPath = document.createElementNS(NS, "path");
+  areaPath.setAttribute("d", area);
+  areaPath.setAttribute("style", "fill:" + color + ";stroke:none");
+  areaPath.setAttribute("opacity", "0.12");
+  el.appendChild(areaPath);
+  const linePath = document.createElementNS(NS, "path");
+  linePath.setAttribute("d", d);
+  linePath.setAttribute("style", "fill:none;stroke:" + color);
+  linePath.setAttribute("stroke-width", "1.5");
+  linePath.setAttribute("vector-effect", "non-scaling-stroke");
+  linePath.setAttribute("stroke-linejoin", "round");
+  linePath.setAttribute("stroke-linecap", "round");
+  el.appendChild(linePath);
 }
 
 // ── Rendering ────────────────────────────────────────────
@@ -252,17 +266,27 @@ function renderFooter(data) {
   $("footReset").textContent = (s && s.resetsAt)
     ? fmtCountdown(new Date(s.resetsAt).getTime()) + " · " + fmtAt(new Date(s.resetsAt).getTime())
     : "—";
-  $("footSource").textContent = "v" + chrome.runtime.getManifest().version + " · "
-    + (data.platform === "intl" ? "api.z.ai" : "open.bigmodel.cn")
-    + (data.ts ? " · " + new Date(data.ts).toLocaleTimeString() : "");
-  // Дата последнего обновления кода (пишется при самоперезапуске после git pull).
-  chrome.storage.local.get("lastUpdate").then((r) => {
-    const lu = r.lastUpdate;
-    if (!lu || !lu.at) return;
-    const d = new Date(lu.at);
-    const when = d.toLocaleDateString() + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    $("footSource").textContent += (currentLang === "ru" ? " · обновлено " : " · updated ") + when;
-  }).catch(() => {});
+  // Версия + хост + время данных + дата обновления кода (из кэша, без
+  // асинхронного чтения storage на каждом тике — иначе текст накапливался).
+  let parts = ["v" + chrome.runtime.getManifest().version];
+  parts.push(data.platform === "intl" ? "api.z.ai" : "open.bigmodel.cn");
+  if (data.ts) parts.push(new Date(data.ts).toLocaleTimeString());
+  if (lastUpdateInfo && lastUpdateInfo.at) {
+    const d = new Date(lastUpdateInfo.at);
+    const when = d.toLocaleDateString() + " " +
+      d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    parts.push((currentLang === "ru" ? "обновлено " : "updated ") + when);
+  }
+  $("footSource").textContent = parts.join(" · ");
+}
+
+async function loadLastUpdate() {
+  try {
+    const r = await chrome.storage.local.get("lastUpdate");
+    lastUpdateInfo = r.lastUpdate || null;
+  } catch (e) {
+    lastUpdateInfo = null;
+  }
 }
 
 function render(data) {
@@ -401,6 +425,7 @@ async function poll() {
   try {
     const r = await chrome.runtime.sendMessage({ type: "poll" });
     await loadHistory();
+    await loadLastUpdate();
     render(r && r.ok ? r : { ok: false });
   } catch (e) {
     await loadHistory();
@@ -485,23 +510,44 @@ async function popout() {
 }
 
 // ── Tick (countdown updates) ──────────────────────────────
+// Каждую секунду меняются только тексты обратного отсчёта — полный render()
+// (перерисовка SVG-графиков, пересчёт серий) не нужен и тормозит.
+function tickUpdate() {
+  if (!latestData || !latestData.ok) return;
+  const pairs = [
+    ["metricSession", "sessionReset", "s"],
+    ["metricWeekly", "weeklyReset", "w"],
+    ["metricMcp", "mcpReset", "mcp"],
+  ];
+  for (const [elId, resetId, key] of pairs) {
+    const el = $(elId);
+    if (!el || el.style.display === "none") continue;
+    const w = latestData[key];
+    if (!w || !w.resetsAt) continue;
+    const ms = new Date(w.resetsAt).getTime();
+    $(resetId).textContent = fmtCountdown(ms) + " · " + fmtAt(ms);
+  }
+  const s = latestData.s;
+  if (s && s.resetsAt) {
+    const ms = new Date(s.resetsAt).getTime();
+    $("footReset").textContent = fmtCountdown(ms) + " · " + fmtAt(ms);
+  }
+}
+
 function startTick() {
   if (tickTimer) clearInterval(tickTimer);
-  tickTimer = setInterval(() => {
-    if (latestData && latestData.ok) {
-      render(latestData);
-    }
-  }, 1000);
+  tickTimer = setInterval(tickUpdate, 1000);
 }
 
 // ── Init ──────────────────────────────────────────────────
 async function init() {
   await loadSettings();
   await loadHistory();
+  await loadLastUpdate();
   // Fast path: show cached latest immediately (background may have polled via alarm).
   const cached = await chrome.storage.local.get("latest");
   if (cached.latest) render(cached.latest);
-  await poll();
+  if (!IS_PIP_CLONE) await poll();
   startTick();
 
   $("refresh").addEventListener("click", poll);
@@ -515,13 +561,61 @@ async function init() {
 
   $("langSelect").addEventListener("change", async (e) => {
     currentLang = e.target.value;
+    currentSettings.lang = currentLang;
+    // Язык и тему сохраняем сразу: иначе предпросмотр терялся бы при
+    // закрытии попапа без нажатия Save.
+    await chrome.storage.local.set({ lang: currentLang });
     applyI18n();
     render(latestData);
   });
   $("themeSelect").addEventListener("change", async (e) => {
-    applyTheme(e.target.value);
+    currentSettings.theme = e.target.value;
+    await chrome.storage.local.set({ theme: currentSettings.theme });
+    applyTheme(currentSettings.theme);
   });
 }
+
+// Клон Document PiP не опрашивает API сам — обновления приходят через
+// chrome.storage.onChanged, иначе два экземпляра шлют запросы наперегонки.
+const IS_PIP_CLONE = (typeof documentPictureInPicture !== "undefined" &&
+  documentPictureInPicture.window === window);
+
+// Настройки могли измениться в другом окне (PiP, второе окно, трей) —
+// подхватываем их без перезагрузки попапа.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local") return;
+  if (changes.latest) {
+    const d = changes.latest.newValue;
+    if (d) { latestData = d; render(d); }
+  }
+  if (changes.history) {
+    loadHistory().then(() => render(latestData));
+  }
+  if (changes.lastUpdate) {
+    loadLastUpdate().then(() => render(latestData));
+  }
+  if (changes.lang) {
+    currentSettings.lang = changes.lang.newValue || "en";
+    currentLang = currentSettings.lang;
+    applyI18n();
+    $("langSelect").value = currentLang;
+    render(latestData);
+  }
+  if (changes.theme) {
+    currentSettings.theme = changes.theme.newValue || "light";
+    applyTheme(currentSettings.theme);
+    $("themeSelect").value = currentSettings.theme;
+  }
+  if (changes.viewMode) {
+    currentSettings.viewMode = normalizeViewMode(changes.viewMode.newValue);
+    $("viewModeSelect").value = currentSettings.viewMode;
+    render(latestData);
+  }
+  if (changes.showMcp || changes.notify || changes.badge ||
+      changes.badgeMetric || changes.badgeMode || changes.platform) {
+    render(latestData);
+  }
+});
 
 // Runs both in the popup document and in the Document PiP clone,
 // where the script is injected after DOMContentLoaded has fired.
