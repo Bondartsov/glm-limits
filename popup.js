@@ -6,14 +6,17 @@ const I18N = {
   en: {
     brand: "GLM Limits",
     refresh: "Refresh", compact: "Compact view", pin: "Pin on top",
-    popout: "Open in window", settings: "Settings",
+    popout: "Open in window", settings: "Settings", close: "Close",
     statusOffline: "Offline", statusOnline: "Online",
-    statusError: "Error", loading: "Loading…",
+    statusError: "Error", statusNoKey: "Not set up", loading: "Loading…",
     swUnreachable: "Extension is not responding — press Reload in chrome://extensions",
     updateAvailable: "version {v} available",
+    emptyTitle: "Enter your API key",
+    emptyText: "The key is stored only on your machine and is used to request your GLM Coding Plan quota.",
+    emptyAction: "Enter key",
     session: "Session (5h)", weekly: "Weekly", mcp: "MCP",
     apiKey: "API Key",
-    apiKeyHint: "Your GLM Coding Plan API key. Stored locally, sent only to the quota endpoint.",
+    apiKeyHint: "Your GLM Coding Plan API key. Never shared.",
     keyPersist: "Remember on this device (encrypted)",
     keyStateNone: "No key set",
     keyStateSession: "Key is in memory only — it disappears when the browser closes",
@@ -22,7 +25,7 @@ const I18N = {
     platformAuto: "Auto",
     platformCn: "China · open.bigmodel.cn",
     platformIntl: "International · api.z.ai",
-    platformHint: "Auto detects the site from the key shape — bigmodel.cn and z.ai keys are not interchangeable.",
+    platformHint: "Auto detects the site from your key.",
     interval: "Refresh interval (sec)", viewMode: "View mode",
     viewPopup: "Popup", viewWindow: "Window", viewCompact: "Compact",
     language: "Language", theme: "Theme",
@@ -31,28 +34,35 @@ const I18N = {
     notifyLabel: "Notify at 80/90% of session",
     badgeLabel: "Show percent on icon",
     badgeMetricLabel: "Icon shows",
-    badgeModeLabel: "Show as",
-    badgeModeRemaining: "Left",
-    badgeModeUsed: "Used",
+    valueModeLabel: "Show numbers as",
+    valueModeRemaining: "Remaining",
+    valueModeUsed: "Used",
     save: "Save", reset: "Reset",
+    saved: "Saved", resetDone: "Settings reset",
     plan: "Plan",
-    utilSpent: "used",
+    utilSpent: "used", utilLeft: "left",
     sessionLeft: "Left · session (5h)", weeklyLeft: "Left · weekly", mcpLeft: "Left · MCP",
+    chartHours: "activity by hour",
+    chartDays: "spend by day of week",
     footWhen: "Resets", footSource: "Source",
     today: "Today HH:MM", tomorrow: "Tomorrow HH:MM",
-    resetNow: "Resets now"
+    resetNow: "Resets now",
+    weekdays: ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"],
   },
   ru: {
     brand: "GLM Limits",
     refresh: "Обновить", compact: "Компактный вид", pin: "Закрепить поверх окон",
-    popout: "Открыть в окне", settings: "Настройки",
+    popout: "Открыть в окне", settings: "Настройки", close: "Закрыть",
     statusOffline: "Нет связи", statusOnline: "Онлайн",
-    statusError: "Ошибка", loading: "Загрузка…",
+    statusError: "Ошибка", statusNoKey: "Не настроено", loading: "Загрузка…",
     swUnreachable: "Расширение не отвечает — нажми Reload в chrome://extensions",
     updateAvailable: "доступна версия {v}",
+    emptyTitle: "Введите API-ключ",
+    emptyText: "Ключ хранится только у вас и нужен для запроса квот GLM Coding Plan.",
+    emptyAction: "Ввести ключ",
     session: "Сессия (5ч)", weekly: "Неделя", mcp: "MCP",
     apiKey: "API-ключ",
-    apiKeyHint: "Ваш API-ключ GLM Coding Plan. Хранится локально, уходит только на endpoint квот.",
+    apiKeyHint: "Ваш API-ключ GLM Coding Plan. Никому не передавайте.",
     keyPersist: "Запомнить на этом устройстве (шифровать)",
     keyStateNone: "Ключ не задан",
     keyStateSession: "Ключ только в памяти — исчезнет после закрытия браузера",
@@ -61,7 +71,7 @@ const I18N = {
     platformAuto: "Авто",
     platformCn: "Китай · open.bigmodel.cn",
     platformIntl: "Международный · api.z.ai",
-    platformHint: "«Авто» определяет площадку по виду ключа — ключи bigmodel.cn и z.ai не взаимозаменяемы.",
+    platformHint: "«Авто» определяет площадку по виду ключа.",
     interval: "Интервал обновления (сек)", viewMode: "Режим отображения",
     viewPopup: "Popup", viewWindow: "Окно", viewCompact: "Компактный",
     language: "Язык", theme: "Тема",
@@ -70,16 +80,20 @@ const I18N = {
     notifyLabel: "Уведомлять при 80/90% сессии",
     badgeLabel: "Процент на иконке",
     badgeMetricLabel: "Что показывает иконка",
-    badgeModeLabel: "Показывать",
-    badgeModeRemaining: "Остаток",
-    badgeModeUsed: "Израсходовано",
+    valueModeLabel: "Показывать числа как",
+    valueModeRemaining: "Остаток",
+    valueModeUsed: "Израсходовано",
     save: "Сохранить", reset: "Сбросить",
+    saved: "Сохранено", resetDone: "Настройки сброшены",
     plan: "Тариф",
-    utilSpent: "израсходовано",
+    utilSpent: "израсходовано", utilLeft: "осталось",
     sessionLeft: "Осталось · сессия (5ч)", weeklyLeft: "Осталось · неделя", mcpLeft: "Осталось · MCP",
+    chartHours: "активность по часам",
+    chartDays: "расход по дням недели",
     footWhen: "Сброс", footSource: "Источник",
     today: "Сегодня HH:MM", tomorrow: "Завтра HH:MM",
-    resetNow: "Сброс сейчас"
+    resetNow: "Сброс сейчас",
+    weekdays: ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"],
   }
 };
 
@@ -87,9 +101,10 @@ let currentLang = "en";
 let currentSettings = {};
 let latestData = null;
 let tickTimer = null;
+let toastTimer = null;
 let historyData = [];
-let lastUpdateInfo = null;   // кэш lastUpdate — читаем из storage не каждый кадр
-let updateAvailableInfo = null;  // метка «доступна новая версия» (постоянная)
+let lastUpdateInfo = null;      // кэш lastUpdate — читаем из storage не каждый кадр
+let updateAvailableInfo = null; // метка «доступна новая версия» (постоянная)
 
 // ── Helpers ──────────────────────────────────────────────
 function t(key) {
@@ -111,11 +126,17 @@ function normalizeTheme(v) {
   return v === "dark" ? "dark" : "light";
 }
 
+// Режим показа чисел: остаток (по умолчанию) или израсходовано.
+// Ключ хранилища — valueMode (старый badgeMode поддерживается для миграции).
+function valueMode() {
+  return currentSettings.valueMode === "used" ? "used" : "remaining";
+}
+
 function levelColor(p) {
-  if (p < 50) return "var(--green)";
-  if (p < 75) return "var(--yellow)";
-  if (p < 90) return "var(--amber)";
-  return "var(--red)";
+  if (p < 50) return "var(--ok)";
+  if (p < 75) return "var(--warn)";
+  if (p < 90) return "var(--hot)";
+  return "var(--risk)";
 }
 
 function fmtCountdown(epochMs) {
@@ -150,63 +171,7 @@ function fmtAt(epochMs) {
   return dayName + " " + timeStr;
 }
 
-// ── Часовой график активности ───────────────────────────────
-// 24 столбца по часам суток (00..23) + подписи оси — видно, в какие часы
-// шла работа, а не просто «кривая без координат».
-function renderHourlyChart(el, buckets) {
-  if (!el) return;
-  const list = Array.isArray(buckets) ? buckets : [];
-  if (!list.some((b) => b && b.has)) { el.style.display = "none"; return; }
-  el.style.display = "block";
-
-  const W = 328, H = 30, AXIS_H = 11;
-  const max = Math.max(1, ...list.map((b) => b.value));
-  const slot = W / 24;
-  const nowHour = new Date().getHours();
-  const NS = "http://www.w3.org/2000/svg";
-
-  while (el.firstChild) el.removeChild(el.firstChild);
-
-  for (const b of list) {
-    const x = b.hour * slot + 1;
-    const w = slot - 2;
-    if (!b.has) {
-      const ghost = document.createElementNS(NS, "rect");
-      ghost.setAttribute("x", String(x));
-      ghost.setAttribute("y", String(H - 2));
-      ghost.setAttribute("width", String(w));
-      ghost.setAttribute("height", "2");
-      ghost.setAttribute("style", "fill:var(--track)");
-      el.appendChild(ghost);
-      continue;
-    }
-    const h = Math.max(2, (b.value / max) * (H - 2));
-    const rect = document.createElementNS(NS, "rect");
-    rect.setAttribute("x", String(x));
-    rect.setAttribute("y", String(H - h));
-    rect.setAttribute("width", String(w));
-    rect.setAttribute("height", String(h));
-    rect.setAttribute("rx", "1.5");
-    const isNow = b.hour === nowHour;
-    rect.setAttribute("style", isNow
-      ? "fill:var(--accent)"
-      : "fill:var(--accent);opacity:" + (0.35 + 0.55 * (b.value / max)).toFixed(2));
-    el.appendChild(rect);
-  }
-
-  // Ось часов: 00 / 06 / 12 / 18 / 23
-  for (const hour of [0, 6, 12, 18, 23]) {
-    const label = document.createElementNS(NS, "text");
-    label.setAttribute("x", String(hour * slot + slot / 2));
-    label.setAttribute("y", String(H + 8));
-    label.setAttribute("text-anchor", "middle");
-    label.setAttribute("style", "fill:var(--text-muted);font-size:8px");
-    label.textContent = String(hour).padStart(2, "0");
-    el.appendChild(label);
-  }
-}
-
-// ── Sparkline ────────────────────────────────────────────
+// ── Данные ────────────────────────────────────────────────
 async function loadHistory() {
   try {
     const r = await chrome.storage.local.get("history");
@@ -214,150 +179,6 @@ async function loadHistory() {
   } catch (e) {
     historyData = [];
   }
-}
-
-// History points of one window ("s" or "w") since its start.
-// Window length is derived from the reset time (5h session, 7d week).
-function windowSeries(kind, resetsAt) {
-  const len = kind === "s" ? 5 * 3600e3 : 7 * 24 * 3600e3;
-  const startTs = resetsAt ? resetsAt - len : Date.now() - len;
-  return historyData
-    .filter(p => p && p.ts >= startTs && typeof p[kind] === "number")
-    .map(p => ({ ts: p.ts, v: p[kind] }))
-    .sort((a, b) => a.ts - b.ts);   // на случай неупорядоченной истории
-}
-
-function renderSparkline(el, pts) {
-  if (!el) return;
-  const clean = (pts || []).filter(p => p && typeof p.v === "number");
-  if (clean.length < 2) { el.style.display = "none"; return; }
-  el.style.display = "block";
-  const W = 328, H = 26, PAD = 2;
-  const t0 = clean[0].ts, t1 = clean[clean.length - 1].ts;
-  const span = Math.max(t1 - t0, 1);
-  const x = (ts) => PAD + (ts - t0) / span * (W - 2 * PAD);
-  const y = (v) => H - PAD - (Math.max(0, Math.min(100, v)) / 100) * (H - 2 * PAD);
-  let d = "M" + x(clean[0].ts).toFixed(1) + " " + y(clean[0].v).toFixed(1);
-  for (let i = 1; i < clean.length; i++) {
-    d += " L" + x(clean[i].ts).toFixed(1) + " " + y(clean[i].v).toFixed(1);
-  }
-  const area = d + " L" + x(t1).toFixed(1) + " " + (H - PAD) + " L" + x(t0).toFixed(1) + " " + (H - PAD) + " Z";
-  const color = levelColor(clean[clean.length - 1].v);
-  // Собираем SVG через DOM API, а не innerHTML: данные приходят из storage.
-  const NS = "http://www.w3.org/2000/svg";
-  while (el.firstChild) el.removeChild(el.firstChild);
-  const areaPath = document.createElementNS(NS, "path");
-  areaPath.setAttribute("d", area);
-  areaPath.setAttribute("style", "fill:" + color + ";stroke:none");
-  areaPath.setAttribute("opacity", "0.12");
-  el.appendChild(areaPath);
-  const linePath = document.createElementNS(NS, "path");
-  linePath.setAttribute("d", d);
-  linePath.setAttribute("style", "fill:none;stroke:" + color);
-  linePath.setAttribute("stroke-width", "1.5");
-  linePath.setAttribute("vector-effect", "non-scaling-stroke");
-  linePath.setAttribute("stroke-linejoin", "round");
-  linePath.setAttribute("stroke-linecap", "round");
-  el.appendChild(linePath);
-}
-
-// ── Rendering ────────────────────────────────────────────
-function setStatus(kind, text) {
-  const dot = document.querySelector("#status .dot");
-  const txt = document.querySelector("#status .status-text");
-  if (dot) dot.className = "dot " + kind;
-  if (txt) txt.textContent = text;
-}
-
-function showMetric(elId, pctId, barId, resetId, data, sparkId, series) {
-  const el = $(elId);
-  if (!data || data == null || typeof data !== "object") {
-    el.style.display = "none";
-    return;
-  }
-  el.style.display = "";
-  const pct = $(pctId);
-  const bar = $(barId);
-  const reset = $(resetId);
-  // GLM API "percentage" = utilization = how much is ALREADY spent.
-  // User-facing number = remaining (what is left).
-  const used = Number(data.utilization);
-  const remaining = isNaN(used) ? null : Math.max(0, Math.min(100, 100 - used));
-  if (remaining == null) {
-    pct.textContent = "—";
-    bar.style.width = "0%";
-    reset.textContent = "—";
-    if (sparkId) renderSparkline($(sparkId), []);
-    return;
-  }
-  pct.textContent = remaining.toFixed(0);
-  pct.style.color = levelColor(100 - remaining);
-  bar.style.width = remaining + "%";
-  bar.style.background = levelColor(100 - remaining);
-  // Utilization annotation — сколько израсходовано. Если API отдаёт
-  // абсолютные значения (usage/currentValue) — показываем их.
-  const annoId = elId.replace("metric", "").toLowerCase() + "Anno";
-  const anno = $(annoId);
-  if (anno) {
-    const spent = data.spent, total = data.total;
-    if (spent != null && total != null) {
-      const spentTxt = GLMQuota.formatAmount(spent, currentLang);
-      const totalTxt = GLMQuota.formatAmount(total, currentLang);
-      anno.textContent = t("utilSpent") + " " + spentTxt + " / " + totalTxt +
-        " (" + used.toFixed(0) + "%)";
-    } else {
-      anno.textContent = t("utilSpent") + " " + used.toFixed(0) + "%";
-    }
-  }
-  // Usage sparkline — drawn from the local history when there are enough points.
-  if (sparkId) renderSparkline($(sparkId), series || []);
-  // Reset countdown — nextResetTime is epoch ms.
-  const resetMs = data.resetsAt ? new Date(data.resetsAt).getTime() : null;
-  if (resetMs && resetMs > 0) {
-    reset.textContent = fmtCountdown(resetMs) + " · " + fmtAt(resetMs);
-  } else {
-    reset.textContent = "—";
-  }
-}
-
-function showChip(chipId, pctId, data) {
-  const chip = $(chipId);
-  if (!data || data == null || typeof data !== "object") {
-    chip.style.display = "none";
-    return;
-  }
-  chip.style.display = "";
-  const used = Number(data.utilization);
-  const remaining = isNaN(used) ? null : Math.max(0, Math.min(100, 100 - used));
-  if (remaining == null) {
-    $(pctId).textContent = "—";
-    return;
-  }
-  $(pctId).textContent = remaining.toFixed(0);
-  $(pctId).style.color = levelColor(100 - remaining);
-}
-
-function renderFooter(data) {
-  const f = $("footer");
-  if (!f) return;
-  if (!data || !data.ok) { f.style.display = "none"; return; }
-  f.style.display = "";
-  const s = data.s;
-  $("footReset").textContent = (s && s.resetsAt)
-    ? fmtCountdown(new Date(s.resetsAt).getTime()) + " · " + fmtAt(new Date(s.resetsAt).getTime())
-    : "—";
-  // Версия + хост + время данных + дата обновления кода (из кэша, без
-  // асинхронного чтения storage на каждом тике — иначе текст накапливался).
-  let parts = ["v" + chrome.runtime.getManifest().version];
-  parts.push(data.platform === "intl" ? "api.z.ai" : "open.bigmodel.cn");
-  if (data.ts) parts.push(new Date(data.ts).toLocaleTimeString());
-  if (lastUpdateInfo && lastUpdateInfo.at) {
-    const d = new Date(lastUpdateInfo.at);
-    const when = d.toLocaleDateString() + " " +
-      d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    parts.push((currentLang === "ru" ? "обновлено " : "updated ") + when);
-  }
-  $("footSource").textContent = parts.join(" · ");
 }
 
 async function loadLastUpdate() {
@@ -369,8 +190,8 @@ async function loadLastUpdate() {
   }
 }
 
-// Постоянная метка «доступно обновление» — она видна в попапе всегда,
-// а не только во всплывающем уведомлении.
+// Постоянная метка «доступно обновление» — видна всегда, а не только во
+// всплывающем уведомлении.
 async function loadUpdateInfo() {
   try {
     const r = await chrome.storage.local.get("updateAvailable");
@@ -380,53 +201,240 @@ async function loadUpdateInfo() {
   }
 }
 
+// ── Графики ───────────────────────────────────────────────
+// bars: [{ value, has }], labels: подписи оси (по одной на столбец).
+function renderChart(el, bars, labels, barH, highlightIndex) {
+  if (!el) return;
+  const list = Array.isArray(bars) ? bars : [];
+  if (!list.some((b) => b && b.has)) { el.style.display = "none"; return; }
+  el.style.display = "block";
+
+  const W = 328, H = barH;
+  const max = Math.max(1, ...list.map((b) => b.value));
+  const slot = W / list.length;
+  const NS = "http://www.w3.org/2000/svg";
+
+  while (el.firstChild) el.removeChild(el.firstChild);
+
+  list.forEach((b, i) => {
+    const x = i * slot + 1;
+    const w = Math.max(2, slot - 2);
+    const rect = document.createElementNS(NS, "rect");
+    if (!b.has) {
+      rect.setAttribute("x", String(x));
+      rect.setAttribute("y", String(H - 2));
+      rect.setAttribute("width", String(w));
+      rect.setAttribute("height", "2");
+      rect.setAttribute("style", "fill:var(--track)");
+    } else {
+      const h = Math.max(2, (b.value / max) * (H - 2));
+      rect.setAttribute("x", String(x));
+      rect.setAttribute("y", String(H - h));
+      rect.setAttribute("width", String(w));
+      rect.setAttribute("height", String(h));
+      rect.setAttribute("rx", "1.5");
+      const strong = i === highlightIndex;
+      rect.setAttribute("style", strong
+        ? "fill:var(--accent)"
+        : "fill:var(--accent);opacity:" + (0.35 + 0.5 * (b.value / max)).toFixed(2));
+    }
+    el.appendChild(rect);
+  });
+
+  (labels || []).forEach((label, i) => {
+    const node = document.createElementNS(NS, "text");
+    node.setAttribute("x", String(i * slot + slot / 2));
+    node.setAttribute("y", String(H + 8));
+    node.setAttribute("text-anchor", "middle");
+    node.setAttribute("style", "fill:var(--muted);font-size:" + (labels.length > 8 ? "7px" : "9px"));
+    node.textContent = label;
+    el.appendChild(node);
+  });
+}
+
+// ── Рендеринг ─────────────────────────────────────────────
+function setStatus(kind, text, extra) {
+  const dot = document.querySelector("#status .dot");
+  const txt = document.querySelector("#status .status-text");
+  if (dot) dot.className = "dot " + kind;
+  if (txt) txt.textContent = text;
+  const ex = $("statusExtra");
+  if (ex) ex.textContent = extra || "";
+}
+
+// Подпись под числом: в зависимости от режима — «израсходовано» или «осталось».
+function metricNote(data) {
+  const used = Number(data.utilization);
+  const remaining = 100 - used;
+  const total = data.total != null ? GLMQuota.formatAmount(data.total, currentLang) : null;
+  if (valueMode() === "used") {
+    const remTxt = data.remaining != null ? GLMQuota.formatAmount(data.remaining, currentLang) : null;
+    const abs = (remTxt && total) ? " · " + remTxt + " / " + total : "";
+    return t("utilLeft") + " " + remaining.toFixed(0) + "%" + abs;
+  }
+  const spentTxt = data.spent != null ? GLMQuota.formatAmount(data.spent, currentLang) : null;
+  const abs = (spentTxt && total) ? " " + spentTxt + " / " + total : "";
+  return t("utilSpent") + " " + used.toFixed(0) + "%" + abs;
+}
+
+// Число, которое показываем (остаток или израсходовано).
+function displayValue(used) {
+  return valueMode() === "used" ? used : 100 - used;
+}
+
+// Главная карточка (сессия): крупное число + полоса.
+function showHero(elId, pctId, barId, annoId, data) {
+  const el = $(elId);
+  if (!data || typeof data !== "object") { el.style.display = "none"; return; }
+  el.style.display = "";
+  const used = Number(data.utilization);
+  if (isNaN(used)) {
+    $(pctId).textContent = "—";
+    $(barId).style.width = "0%";
+    $(annoId).textContent = "";
+    return;
+  }
+  const shown = displayValue(used);
+  $(pctId).textContent = shown.toFixed(0);
+  $(pctId).style.color = levelColor(used);
+  $(barId).style.width = shown + "%";
+  $(barId).style.background = levelColor(used);
+  $(annoId).textContent = metricNote(data);
+}
+
+// Компактная строка (неделя, MCP): значение + мини-полоса + время сброса.
+function showLine(elId, valueId, barId, whenId, annoId, data) {
+  const el = $(elId);
+  if (!data || typeof data !== "object") { el.style.display = "none"; return; }
+  el.style.display = "";
+  const used = Number(data.utilization);
+  if (isNaN(used)) {
+    $(valueId).textContent = "—";
+    $(barId).style.width = "0%";
+    return;
+  }
+  const shown = displayValue(used);
+  $(valueId).textContent = shown.toFixed(0) + "%";
+  $(valueId).style.color = levelColor(used);
+  $(barId).style.width = shown + "%";
+  $(barId).style.background = levelColor(used);
+  if (annoId) $(annoId).textContent = metricNote(data);
+  if (whenId) {
+    const ms = data.resetsAt ? new Date(data.resetsAt).getTime() : null;
+    $(whenId).textContent = ms ? fmtCountdown(ms) : "—";
+  }
+}
+
+function showChip(chipId, pctId, data) {
+  const chip = $(chipId);
+  if (!data || typeof data !== "object") { chip.style.display = "none"; return; }
+  chip.style.display = "";
+  const used = Number(data.utilization);
+  if (isNaN(used)) { $(pctId).textContent = "—"; return; }
+  const shown = displayValue(used);
+  $(pctId).textContent = shown.toFixed(0);
+  $(pctId).style.color = levelColor(used);
+}
+
+function renderFooter(data) {
+  const f = $("footer");
+  if (!f) return;
+  if (!data || !data.ok) { f.style.display = "none"; return; }
+  f.style.display = "";
+  const s = data.s;
+  $("footReset").textContent = (s && s.resetsAt)
+    ? fmtCountdown(new Date(s.resetsAt).getTime()) + " · " + fmtAt(new Date(s.resetsAt).getTime())
+    : "—";
+  let parts = ["v" + chrome.runtime.getManifest().version];
+  parts.push(data.platform === "intl" ? "api.z.ai" : "open.bigmodel.cn");
+  if (lastUpdateInfo && lastUpdateInfo.at) {
+    const d = new Date(lastUpdateInfo.at);
+    parts.push((currentLang === "ru" ? "обновлено " : "updated ") +
+      d.toLocaleDateString() + " " +
+      d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+  }
+  $("footSource").textContent = parts.join(" · ");
+}
+
+function showEmptyState() {
+  $("emptyState").style.display = "";
+  $("loading").style.display = "none";
+  $("metricSession").style.display = "none";
+  $("metricWeekly").style.display = "none";
+  $("metricMcp").style.display = "none";
+  $("planBadge").style.display = "none";
+  $("footer").style.display = "none";
+  setStatus("offline", t("statusNoKey"));
+}
+
 function render(data) {
   latestData = data;
+
+  if (data && data.noKey) {
+    showEmptyState();
+    return;
+  }
+  $("emptyState").style.display = "none";
+
   if (!data || !data.ok) {
     const errTxt = (data && data.error) ? String(data.error) : t("statusError");
     setStatus("error", t("statusError"));
-    // Текст ошибки — в тело попапа, а не только в строку статуса.
     $("loading").textContent = errTxt;
     $("loading").style.display = "";
-    $("fullView").style.display = "none";
-    $("compactView").style.display = "none";
+    $("metricSession").style.display = "none";
+    $("metricWeekly").style.display = "none";
+    $("metricMcp").style.display = "none";
+    $("planBadge").style.display = "none";
+    $("footer").style.display = "none";
     return;
   }
 
-  setStatus("online", t("statusOnline") + (updateAvailableInfo
-    ? " · ↑ " + t("updateAvailable").replace("{v}", updateAvailableInfo.version)
+  setStatus("online", t("statusOnline"), (updateAvailableInfo
+    ? "↑ " + t("updateAvailable").replace("{v}", updateAvailableInfo.version)
     : ""));
   $("loading").style.display = "none";
 
   const viewMode = normalizeViewMode(currentSettings.viewMode);
   $("compact").classList.toggle("active", viewMode === "compact");
   if (viewMode === "compact") {
-    $("fullView").style.display = "none";
+    $("metricSession").style.display = "none";
+    $("metricWeekly").style.display = "none";
+    $("metricMcp").style.display = "none";
+    $("planBadge").style.display = "none";
     $("compactView").style.display = "";
     showChip("chipSession", "chipSessionPct", data.s);
     showChip("chipWeekly", "chipWeeklyPct", data.w);
-  } else {
-    $("compactView").style.display = "none";
-    $("fullView").style.display = "";
-    const sResetsAt = (data.s && data.s.resetsAt) ? new Date(data.s.resetsAt).getTime() : null;
-    const wResetsAt = (data.w && data.w.resetsAt) ? new Date(data.w.resetsAt).getTime() : null;
-    showMetric("metricSession", "sessionPct", "sessionBar", "sessionReset", data.s,
-      null, null);
-    showMetric("metricWeekly", "weeklyPct", "weeklyBar", "weeklyReset", data.w,
-      "weeklySpark", windowSeries("w", wResetsAt));
-    // Активность сессии по часам суток (шкала 00..23).
-    renderHourlyChart($("sessionChart"), GLMQuota.hourlyActivity(
-      historyData.map(p => ({ ts: p.ts, v: p.s })), Date.now()));
-    if (currentSettings.showMcp && data.mcp) {
-      showMetric("metricMcp", "mcpPct", "mcpBar", "mcpReset", data.mcp);
-    } else {
-      $("metricMcp").style.display = "none";
-    }
-    if (data.plan) {
-      $("planBadge").textContent = t("plan") + ": " + data.plan;
-      $("planBadge").style.display = "";
-    }
+    renderFooter(data);
+    return;
   }
+  $("compactView").style.display = "none";
+
+  showHero("metricSession", "sessionPct", "sessionBar", "sessionAnno", data.s);
+  showLine("metricWeekly", "weeklyPct", "weeklyBar", "weeklyReset", "weeklyAnno", data.w);
+  if (currentSettings.showMcp && data.mcp) {
+    showLine("metricMcp", "mcpPct", "mcpBar", "mcpReset", "mcpAnno", data.mcp);
+  } else {
+    $("metricMcp").style.display = "none";
+  }
+  if (data.plan) {
+    $("planBadge").textContent = t("plan") + ": " + data.plan;
+    $("planBadge").style.display = "";
+  } else {
+    $("planBadge").style.display = "none";
+  }
+
+  // Активность сессии по часам суток (каждый час — свой столбец).
+  const hourLabels = [];
+  for (let h = 0; h < 24; h++) hourLabels.push(String(h).padStart(2, "0"));
+  renderChart($("sessionChart"), GLMQuota.hourlyActivity(
+    historyData.map((p) => ({ ts: p.ts, v: p.s })), Date.now()),
+    hourLabels, 32, new Date().getHours());
+
+  // Расход недельного окна по дням недели (Пн..Вс).
+  renderChart($("weeklyChart"), GLMQuota.dailyActivity(
+    historyData.map((p) => ({ ts: p.ts, v: p.w })), Date.now()),
+    t("weekdays"), 18, (new Date().getDay() + 6) % 7);
+
   renderFooter(data);
 }
 
@@ -445,17 +453,26 @@ function applyTheme(theme) {
   document.documentElement.setAttribute("data-theme", normalizeTheme(theme));
 }
 
-// ── Settings ──────────────────────────────────────────────
+// ── Всплывающее подтверждение ─────────────────────────────
+function showToast(text) {
+  const el = $("toast");
+  if (!el) return;
+  el.textContent = text;
+  el.style.display = "block";
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.style.display = "none"; }, 2200);
+}
+
+// ── Настройки ──────────────────────────────────────────────
 async function loadSettings() {
   const r = await chrome.storage.local.get([
-    "platform", "intervalSec", "viewMode",
-    "lang", "theme", "showMcp", "notify", "badge", "badgeMetric", "badgeMode"
+    "platform", "intervalSec", "viewMode", "lang", "theme",
+    "showMcp", "notify", "badge", "badgeMetric", "valueMode", "badgeMode", "keyPersist"
   ]);
-  const stored = await chrome.storage.local.get("keyPersist");
+  const storedPersist = await chrome.storage.local.get("keyPersist");
   // По умолчанию ключ запоминается — но в зашифрованном виде.
-  const persist = stored.keyPersist !== false;
+  const persist = storedPersist.keyPersist !== false;
   const hasKey = Boolean(await GLMKeyring.getApiKey());
-  const persisted = persist && hasKey;
   currentSettings = {
     platform: normalizePlatform(r.platform),
     intervalSec: r.intervalSec || 120,
@@ -466,7 +483,7 @@ async function loadSettings() {
     notify: r.notify !== false,
     badge: r.badge !== false,
     badgeMetric: r.badgeMetric === "w" ? "w" : "s",
-    badgeMode: r.badgeMode === "used" ? "used" : "remaining",
+    valueMode: (r.valueMode || r.badgeMode) === "used" ? "used" : "remaining",
     keyPersist: persist
   };
   currentLang = currentSettings.lang;
@@ -480,7 +497,7 @@ async function loadSettings() {
   $("notifyCheck").checked = currentSettings.notify;
   $("badgeCheck").checked = currentSettings.badge;
   $("badgeMetricSelect").value = currentSettings.badgeMetric;
-  $("badgeModeSelect").value = currentSettings.badgeMode;
+  $("badgeModeSelect").value = currentSettings.valueMode;
   $("keyPersistCheck").checked = persist;
 
   // Сам ключ никогда не показываем и не подставляем в поле — только статус.
@@ -515,7 +532,7 @@ async function saveSettings() {
     notify: $("notifyCheck").checked,
     badge: $("badgeCheck").checked,
     badgeMetric: $("badgeMetricSelect").value,
-    badgeMode: $("badgeModeSelect").value,
+    valueMode: $("badgeModeSelect").value,
     keyPersist: persist
   };
   await chrome.storage.local.set(currentSettings);
@@ -525,6 +542,7 @@ async function saveSettings() {
 
   // Notify background to apply new settings (await so storage is flushed first)
   try { await chrome.runtime.sendMessage({ type: "applySettings" }); } catch (e) {}
+  showToast(t("saved"));
   await poll();
   await loadSettings();   // обновить статус ключа и плейсхолдер
 }
@@ -532,18 +550,19 @@ async function saveSettings() {
 async function resetSettings() {
   await GLMKeyring.clearApiKey();
   await chrome.storage.local.remove([
-    "platform", "intervalSec", "viewMode",
-    "lang", "theme", "showMcp", "notify", "badge", "badgeMetric", "badgeMode"
+    "platform", "intervalSec", "viewMode", "lang", "theme",
+    "showMcp", "notify", "badge", "badgeMetric", "valueMode", "keyPersist"
   ]);
   await loadSettings();
   // Background keeps its own alarm/popup state — re-apply defaults there too.
   try { await chrome.runtime.sendMessage({ type: "applySettings" }); } catch (e) {}
+  showToast(t("resetDone"));
   poll();
 }
 
 // ── Polling ───────────────────────────────────────────────
-// Таймаут запроса к service worker: если он мёртв (например, после неудачного
-// обновления), попап не должен висеть на «Загрузка…» бесконечно.
+// Таймаут запроса к service worker: если он мёртв, попап не должен висеть
+// на «Загрузка…» бесконечно.
 const POLL_TIMEOUT_MS = 6000;
 
 function withTimeout(promise, ms) {
@@ -559,14 +578,14 @@ async function poll() {
     await loadHistory();
     await loadLastUpdate();
     await loadUpdateInfo();
-    render(r && r.ok ? r : { ok: false });
+    render(r && r.ok ? r : (r && r.noKey ? r : { ok: false }));
   } catch (e) {
     await loadHistory();
     render({ ok: false, error: t("swUnreachable") });
   }
 }
 
-// ── View toggles ──────────────────────────────────────────
+// ── Переключатели ─────────────────────────────────────────
 function toggleCompact() {
   const next = currentSettings.viewMode === "compact" ? "popup" : "compact";
   $("viewModeSelect").value = next;
@@ -575,15 +594,13 @@ function toggleCompact() {
   render(latestData);
 }
 
-function toggleSettings() {
+function toggleSettings(forceOpen) {
   const panel = $("settingsPanel");
-  const opening = panel.style.display === "none";
-  panel.style.display = opening ? "" : "none";
-  // The panel sits below the metrics — bring it into view when opened.
-  if (opening) panel.scrollIntoView({ behavior: "smooth", block: "start" });
+  const open = forceOpen === true ? true : (forceOpen === false ? false : panel.style.display === "none");
+  panel.style.display = open ? "" : "none";
 }
 
-// The "which metric"/"show as" selects only make sense when the badge is on.
+// Селекторы «что показывать» скрыты, когда бейдж выключен.
 function updateBadgeField() {
   const on = $("badgeCheck").checked;
   const metric = $("badgeMetricField");
@@ -642,9 +659,7 @@ async function popout() {
   await chrome.windows.create({ url, type: "popup", width: 360, height: 620 });
 }
 
-// ── Tick (countdown updates) ──────────────────────────────
-// Каждую секунду меняются только тексты обратного отсчёта — полный render()
-// (перерисовка SVG-графиков, пересчёт серий) не нужен и тормозит.
+// ── Tick (обратный отсчёт) ────────────────────────────────
 function tickUpdate() {
   if (!latestData || !latestData.ok) return;
   const pairs = [
@@ -678,7 +693,6 @@ async function init() {
   await loadHistory();
   await loadLastUpdate();
   await loadUpdateInfo();
-  // Fast path: show cached latest immediately (background may have polled via alarm).
   const cached = await chrome.storage.local.get("latest");
   if (cached.latest) render(cached.latest);
   if (!IS_PIP_CLONE) await poll();
@@ -686,12 +700,14 @@ async function init() {
 
   $("refresh").addEventListener("click", poll);
   $("compact").addEventListener("click", toggleCompact);
-  $("settings").addEventListener("click", toggleSettings);
+  $("settings").addEventListener("click", () => toggleSettings());
+  $("closeSettings").addEventListener("click", () => toggleSettings(false));
+  $("emptySettings").addEventListener("click", () => toggleSettings(true));
   $("pin").addEventListener("click", togglePin);
   $("popout").addEventListener("click", popout);
-  $("badgeCheck").addEventListener("change", updateBadgeField);
   $("saveSettings").addEventListener("click", saveSettings);
   $("resetSettings").addEventListener("click", resetSettings);
+  $("badgeCheck").addEventListener("change", updateBadgeField);
 
   $("langSelect").addEventListener("change", async (e) => {
     currentLang = e.target.value;
@@ -748,8 +764,14 @@ chrome.storage.onChanged.addListener((changes, area) => {
     $("viewModeSelect").value = currentSettings.viewMode;
     render(latestData);
   }
+  if (changes.valueMode || changes.badgeMode) {
+    currentSettings.valueMode = (changes.valueMode && changes.valueMode.newValue) ||
+      (changes.badgeMode && changes.badgeMode.newValue) || "remaining";
+    $("badgeModeSelect").value = currentSettings.valueMode;
+    render(latestData);
+  }
   if (changes.showMcp || changes.notify || changes.badge ||
-      changes.badgeMetric || changes.badgeMode || changes.platform) {
+      changes.badgeMetric || changes.platform) {
     render(latestData);
   }
 });

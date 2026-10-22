@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="ru" data-theme="light">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -44,170 +44,192 @@
     <div class="status" id="status">
       <span class="dot offline"></span>
       <span class="status-text" data-i18n="statusOffline">Offline</span>
+      <span class="status-extra" id="statusExtra"></span>
     </div>
 
     <!-- Main content -->
     <main class="content" id="content">
+      <!-- Пустое состояние: ключ не введён -->
+      <div class="empty" id="emptyState" style="display:none">
+        <div class="empty-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+        </div>
+        <p class="empty-title" data-i18n="emptyTitle">Введите API-ключ</p>
+        <p class="empty-text" data-i18n="emptyText">Ключ хранится только у вас и нужен для запроса квот GLM Coding Plan.</p>
+        <button class="btn-primary" id="emptySettings" data-i18n="emptyAction">Ввести ключ</button>
+      </div>
+
       <!-- Loading state -->
       <div class="loading" id="loading" data-i18n="loading">Loading…</div>
 
-      <!-- Full view -->
-      <div class="full-view" id="fullView">
-        <!-- Primary metric: session (5h) -->
-        <div class="metric primary" id="metricSession">
-          <div class="metric-label" data-i18n="sessionLeft">Left · session (5h)</div>
-          <div class="metric-value">
-            <span class="pct" id="sessionPct">—</span><span class="pct-unit">%</span>
-          </div>
-          <div class="metric-anno" id="sessionAnno"></div>
-          <div class="bar-track"><div class="bar-fill" id="sessionBar"></div></div>
-          <svg class="chart" id="sessionChart" viewBox="0 0 328 41" style="display:none"></svg>
-          <div class="reset" id="sessionReset"></div>
+      <!-- Hero: сессия (5 ч) -->
+      <section class="card hero" id="metricSession">
+        <div class="card-head">
+          <span class="card-label" data-i18n="sessionLeft">Осталось · сессия (5ч)</span>
+          <span class="card-anno" id="sessionAnno"></span>
         </div>
-
-        <!-- Secondary metric: weekly -->
-        <div class="metric" id="metricWeekly">
-          <div class="metric-label" data-i18n="weeklyLeft">Left · weekly</div>
-          <div class="metric-value">
-            <span class="pct" id="weeklyPct">—</span><span class="pct-unit">%</span>
-          </div>
-          <div class="metric-anno" id="weeklyAnno"></div>
-          <div class="bar-track"><div class="bar-fill" id="weeklyBar"></div></div>
-          <svg class="spark" id="weeklySpark" viewBox="0 0 328 26" preserveAspectRatio="none" style="display:none"></svg>
-          <div class="reset" id="weeklyReset"></div>
+        <div class="hero-value">
+          <span class="pct" id="sessionPct">—</span><span class="pct-unit">%</span>
         </div>
-
-        <!-- Optional: MCP usage -->
-        <div class="metric optional" id="metricMcp" style="display:none">
-          <div class="metric-label" data-i18n="mcpLeft">Left · MCP</div>
-          <div class="metric-value">
-            <span class="pct" id="mcpPct">—</span><span class="pct-unit">%</span>
-          </div>
-          <div class="metric-anno" id="mcpAnno"></div>
-          <div class="bar-track"><div class="bar-fill" id="mcpBar"></div></div>
-          <div class="reset" id="mcpReset"></div>
+        <div class="bar-track"><div class="bar-fill" id="sessionBar"></div></div>
+        <svg class="chart" id="sessionChart" viewBox="0 0 328 44" style="display:none"></svg>
+        <div class="card-foot">
+          <span class="card-hint" data-i18n="chartHours">активность по часам</span>
+          <span class="card-when" id="sessionReset"></span>
         </div>
+      </section>
 
-        <!-- Plan badge -->
-        <div class="plan-badge" id="planBadge"></div>
-      </div>
+      <!-- Неделя -->
+      <section class="card" id="metricWeekly">
+        <div class="card-head">
+          <span class="card-label" data-i18n="weeklyLeft">Осталось · неделя</span>
+          <span class="card-anno" id="weeklyAnno"></span>
+        </div>
+        <div class="line">
+          <span class="line-value" id="weeklyPct">—</span>
+          <span class="mini-track"><span class="mini-fill" id="weeklyBar"></span></span>
+          <span class="line-when" id="weeklyReset"></span>
+        </div>
+        <svg class="chart chart-week" id="weeklyChart" viewBox="0 0 328 28" style="display:none"></svg>
+        <div class="card-foot">
+          <span class="card-hint" data-i18n="chartDays">расход по дням недели</span>
+        </div>
+      </section>
+
+      <!-- MCP -->
+      <section class="card optional" id="metricMcp" style="display:none">
+        <div class="card-head">
+          <span class="card-label" data-i18n="mcpLeft">Осталось · MCP</span>
+          <span class="card-anno" id="mcpAnno"></span>
+        </div>
+        <div class="line">
+          <span class="line-value" id="mcpPct">—</span>
+          <span class="mini-track"><span class="mini-fill" id="mcpBar"></span></span>
+          <span class="line-when" id="mcpReset"></span>
+        </div>
+      </section>
+
+      <!-- Plan badge -->
+      <div class="plan-badge" id="planBadge"></div>
 
       <!-- Compact view -->
       <div class="compact-view" id="compactView" style="display:none">
-        <div class="chip" id="chipSession">
-          <span class="chip-label" data-i18n="session">Session</span>
-          <span class="chip-pct" id="chipSessionPct">—</span>
+        <div class="card line-card" id="chipSession">
+          <span class="card-label" data-i18n="session">Session (5h)</span>
+          <span class="line-value" id="chipSessionPct">—</span>
         </div>
-        <div class="chip" id="chipWeekly">
-          <span class="chip-label" data-i18n="weekly">Weekly</span>
-          <span class="chip-pct" id="chipWeeklyPct">—</span>
+        <div class="card line-card" id="chipWeekly">
+          <span class="card-label" data-i18n="weekly">Weekly</span>
+          <span class="line-value" id="chipWeeklyPct">—</span>
         </div>
       </div>
     </main>
 
     <!-- Footer -->
     <footer class="footer" id="footer" style="display:none">
-      <div class="foot-row">
-        <span class="foot-key" data-i18n="footWhen">Resets</span>
-        <span class="foot-val" id="footReset">—</span>
-      </div>
-      <div class="foot-row">
-        <span class="foot-key" data-i18n="footSource">Source</span>
-        <span class="foot-val" id="footSource">—</span>
-      </div>
+      <span id="footReset">—</span>
+      <span id="footSource">—</span>
     </footer>
 
-    <!-- Settings panel -->
-    <div class="settings-panel" id="settingsPanel" style="display:none">
-      <h3 data-i18n="settings">Settings</h3>
-
-      <div class="field">
-        <label data-i18n="apiKey">API Key</label>
-        <input type="password" id="apiKeyInput" placeholder="glm_… / zai_…" autocomplete="off">
-        <small id="keyState" class="key-state"></small>
-        <label class="check-row">
-          <input type="checkbox" id="keyPersistCheck">
-          <span data-i18n="keyPersist">Remember on this device (encrypted)</span>
-        </label>
-        <small data-i18n="apiKeyHint">Your GLM Coding Plan API key. Never shared.</small>
+    <!-- Settings sheet -->
+    <div class="sheet" id="settingsPanel" style="display:none">
+      <div class="sheet-head">
+        <h3 data-i18n="settings">Settings</h3>
+        <button id="closeSettings" class="btn-icon" title="Close" data-i18n-title="close">
+          <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
       </div>
+      <div class="sheet-body">
+        <div class="field">
+          <label data-i18n="apiKey">API Key</label>
+          <input type="password" id="apiKeyInput" placeholder="glm_… / zai_…" autocomplete="off">
+          <small id="keyState" class="key-state"></small>
+          <label class="check-row">
+            <input type="checkbox" id="keyPersistCheck">
+            <span data-i18n="keyPersist">Remember on this device (encrypted)</span>
+          </label>
+        </div>
 
-      <div class="field">
-        <label data-i18n="platform">Platform</label>
-        <select id="platformSelect">
-          <option value="auto" data-i18n="platformAuto">Auto</option>
-          <option value="cn" data-i18n="platformCn">China · open.bigmodel.cn</option>
-          <option value="intl" data-i18n="platformIntl">International · api.z.ai</option>
-        </select>
-        <small data-i18n="platformHint">Auto detects the site from your key.</small>
-      </div>
+        <div class="field">
+          <label data-i18n="platform">Platform</label>
+          <select id="platformSelect">
+            <option value="auto" data-i18n="platformAuto">Auto</option>
+            <option value="cn" data-i18n="platformCn">China · open.bigmodel.cn</option>
+            <option value="intl" data-i18n="platformIntl">International · api.z.ai</option>
+          </select>
+          <small data-i18n="platformHint">Auto detects the site from your key.</small>
+        </div>
 
-      <div class="field">
-        <label data-i18n="interval">Refresh interval (sec)</label>
-        <input type="number" id="intervalInput" min="30" max="3600" value="120">
-      </div>
+        <div class="field">
+          <label data-i18n="interval">Refresh interval (sec)</label>
+          <input type="number" id="intervalInput" min="30" max="3600" value="120">
+        </div>
 
-      <div class="field">
-        <label data-i18n="viewMode">View mode</label>
-        <select id="viewModeSelect">
-          <option value="popup" data-i18n="viewPopup">Popup</option>
-          <option value="window" data-i18n="viewWindow">Window</option>
-          <option value="compact" data-i18n="viewCompact">Compact</option>
-        </select>
-      </div>
+        <div class="field">
+          <label data-i18n="viewMode">View mode</label>
+          <select id="viewModeSelect">
+            <option value="popup" data-i18n="viewPopup">Popup</option>
+            <option value="window" data-i18n="viewWindow">Window</option>
+            <option value="compact" data-i18n="viewCompact">Compact</option>
+          </select>
+        </div>
 
-      <div class="field">
-        <label data-i18n="language">Language</label>
-        <select id="langSelect">
-          <option value="en">English</option>
-          <option value="ru">Русский</option>
-        </select>
-      </div>
+        <div class="field">
+          <label data-i18n="language">Language</label>
+          <select id="langSelect">
+            <option value="en">English</option>
+            <option value="ru">Русский</option>
+          </select>
+        </div>
 
-      <div class="field">
-        <label data-i18n="theme">Theme</label>
-        <select id="themeSelect">
-          <option value="light" data-i18n="themeLight">Light</option>
-          <option value="dark" data-i18n="themeDark">Dark</option>
-        </select>
-      </div>
+        <div class="field">
+          <label data-i18n="theme">Theme</label>
+          <select id="themeSelect">
+            <option value="light" data-i18n="themeLight">Light</option>
+            <option value="dark" data-i18n="themeDark">Dark</option>
+          </select>
+        </div>
 
-      <div class="field">
-        <label data-i18n="showMcp">Show MCP usage</label>
-        <input type="checkbox" id="showMcpCheck">
-      </div>
+        <div class="field">
+          <label data-i18n="showMcp">Show MCP usage</label>
+          <input type="checkbox" id="showMcpCheck">
+        </div>
 
-      <div class="field">
-        <label data-i18n="notifyLabel">Notify at 80/90% of session</label>
-        <input type="checkbox" id="notifyCheck">
-      </div>
+        <div class="field">
+          <label data-i18n="notifyLabel">Notify at 80/90% of session</label>
+          <input type="checkbox" id="notifyCheck">
+        </div>
 
-      <div class="field">
-        <label data-i18n="badgeLabel">Show percent on icon</label>
-        <input type="checkbox" id="badgeCheck">
-      </div>
+        <div class="field">
+          <label data-i18n="badgeLabel">Show percent on icon</label>
+          <input type="checkbox" id="badgeCheck">
+        </div>
 
-      <div class="field" id="badgeMetricField">
-        <label data-i18n="badgeMetricLabel">Icon shows</label>
-        <select id="badgeMetricSelect">
-          <option value="s" data-i18n="session">Session (5h)</option>
-          <option value="w" data-i18n="weekly">Weekly</option>
-        </select>
-      </div>
+        <div class="field" id="badgeMetricField">
+          <label data-i18n="badgeMetricLabel">Icon shows</label>
+          <select id="badgeMetricSelect">
+            <option value="s" data-i18n="session">Session (5h)</option>
+            <option value="w" data-i18n="weekly">Weekly</option>
+          </select>
+        </div>
 
-      <div class="field" id="badgeModeField">
-        <label data-i18n="badgeModeLabel">Show as</label>
-        <select id="badgeModeSelect">
-          <option value="remaining" data-i18n="badgeModeRemaining">Left</option>
-          <option value="used" data-i18n="badgeModeUsed">Used</option>
-        </select>
-      </div>
+        <div class="field" id="badgeModeField">
+          <label data-i18n="valueModeLabel">Show numbers as</label>
+          <select id="badgeModeSelect">
+            <option value="remaining" data-i18n="valueModeRemaining">Remaining</option>
+            <option value="used" data-i18n="valueModeUsed">Used</option>
+          </select>
+        </div>
 
-      <div class="actions-row">
-        <button id="saveSettings" class="btn-primary" data-i18n="save">Save</button>
-        <button id="resetSettings" class="btn-ghost" data-i18n="reset">Reset</button>
+        <div class="actions-row">
+          <button id="saveSettings" class="btn-primary" data-i18n="save">Save</button>
+          <button id="resetSettings" class="btn-ghost" data-i18n="reset">Reset</button>
+        </div>
       </div>
     </div>
+
+    <!-- Toast -->
+    <div class="toast" id="toast" style="display:none"></div>
   </div>
 
   <script src="quota.js"></script>

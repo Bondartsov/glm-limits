@@ -43,7 +43,7 @@ function makeChromeMock(options = {}) {
       id: "test",
       getURL: (p) => "chrome-extension://test/" + p,
       getManifest: () => ({ version: "0.6.0" }),
-      sendMessage: async () => ({ ok: true, s: null, w: null }),
+      sendMessage: async () => local.latest || { ok: true, s: null, w: null },
       onMessage: { addListener() {} },
       onInstalled: { addListener(fn) { chrome.runtime._onInstalled = fn; } },
       onStartup: { addListener() {} },
@@ -115,15 +115,17 @@ function makeDomMock(ids) {
 }
 
 const POPUP_IDS = [
-  "app", "status", "loading", "fullView", "compactView", "footer", "footReset", "footSource",
-  "metricSession", "sessionPct", "sessionAnno", "sessionBar", "sessionReset", "sessionSpark",
-  "metricWeekly", "weeklyPct", "weeklyAnno", "weeklyBar", "weeklyReset", "weeklySpark",
+  "app", "status", "statusExtra", "emptyState", "emptySettings", "loading",
+  "metricSession", "sessionPct", "sessionAnno", "sessionBar", "sessionChart", "sessionReset",
+  "metricWeekly", "weeklyPct", "weeklyAnno", "weeklyBar", "weeklyReset", "weeklyChart",
   "metricMcp", "mcpPct", "mcpAnno", "mcpBar", "mcpReset",
-  "planBadge", "chipSession", "chipSessionPct", "chipWeekly", "chipWeeklyPct",
-  "settingsPanel", "apiKeyInput", "keyState", "keyPersistCheck", "platformSelect",
-  "intervalInput", "viewModeSelect", "langSelect", "themeSelect", "showMcpCheck",
-  "notifyCheck", "badgeCheck", "badgeMetricSelect", "badgeModeSelect",
-  "saveSettings", "resetSettings", "refresh", "compact", "pin", "popout", "settings",
+  "planBadge", "compactView", "chipSession", "chipSessionPct", "chipWeekly", "chipWeeklyPct",
+  "footer", "footReset", "footSource",
+  "settingsPanel", "closeSettings", "apiKeyInput", "keyState", "keyPersistCheck",
+  "platformSelect", "intervalInput", "viewModeSelect", "langSelect", "themeSelect",
+  "showMcpCheck", "notifyCheck", "badgeCheck", "badgeMetricSelect", "badgeModeSelect",
+  "saveSettings", "resetSettings", "toast",
+  "refresh", "compact", "pin", "popout", "settings",
 ];
 
 function runScript(ctx, file) {
@@ -220,6 +222,70 @@ test("popup.js: init() отрабатывает без исключений (и�
   assert.ok(foot.includes("v0.6.0"), "в футере должна быть версия, получено: " + foot);
   assert.equal(dom.getElementById("loading").style.display, "none",
     "состояние загрузки должно сниматься после init()");
+});
+
+test("popup.js: без ключа показывается пустое состояние, а не «Ошибка»", async () => {
+  const chrome = makeChromeMock();
+  const dom = makeDomMock(POPUP_IDS);
+  const ctx = makeContext(chrome, dom, {
+    importScripts: (...files) => { for (const f of files) runScript(ctx, f); },
+  });
+  runScript(ctx, "quota.js");
+  runScript(ctx, "keyring.js");
+  runScript(ctx, "popup.js");
+
+  chrome._local.latest = { ok: false, noKey: true, ts: Date.now() };
+  await ctx.init();
+
+  assert.equal(dom.getElementById("emptyState").style.display, "",
+    "пустое состояние должно быть показано");
+  assert.equal(dom.getElementById("loading").style.display, "none",
+    "индикатор загрузки не должен мигать");
+  assert.equal(dom.getElementById("status").querySelector ? true : true, true);
+});
+
+test("popup.js: сохранение показывает подтверждение (тост)", async () => {
+  const chrome = makeChromeMock();
+  const dom = makeDomMock(POPUP_IDS);
+  const ctx = makeContext(chrome, dom, {
+    importScripts: (...files) => { for (const f of files) runScript(ctx, f); },
+  });
+  runScript(ctx, "quota.js");
+  runScript(ctx, "keyring.js");
+  runScript(ctx, "popup.js");
+  await ctx.init();
+
+  await ctx.saveSettings();
+  const toast = dom.getElementById("toast");
+  assert.equal(toast.style.display, "block", "тост должен показаться");
+  assert.ok(toast.textContent.length > 0, "у тоста должен быть текст");
+});
+
+test("popup.js: переключатель «остаток/израсходовано» меняет показываемое число", async () => {
+  const chrome = makeChromeMock();
+  const dom = makeDomMock(POPUP_IDS);
+  const ctx = makeContext(chrome, dom, {
+    importScripts: (...files) => { for (const f of files) runScript(ctx, f); },
+  });
+  runScript(ctx, "quota.js");
+  runScript(ctx, "keyring.js");
+  runScript(ctx, "popup.js");
+
+  chrome._local.latest = {
+    ok: true, ts: Date.now(), platform: "cn", plan: "max",
+    s: { utilization: 33, resetsAt: new Date(Date.now() + 3600e3).toISOString() },
+    w: { utilization: 6, resetsAt: new Date(Date.now() + 86400e3).toISOString() },
+  };
+  await ctx.init();
+
+  assert.equal(dom.getElementById("sessionPct").textContent, "67",
+    "по умолчанию показывается остаток (100 - 33)");
+
+  dom.getElementById("badgeModeSelect").value = "used";
+  await ctx.saveSettings();
+  assert.equal(chrome._local.valueMode, "used", "режим должен сохраниться");
+  assert.equal(dom.getElementById("sessionPct").textContent, "33",
+    "в режиме «израсходовано» показывается расход");
 });
 
 test("popup.js: ключ из settings сохраняется через keyring (в память, не на диск)", async () => {

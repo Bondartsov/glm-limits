@@ -998,15 +998,16 @@ class TrayApp:
     def _details_main(self) -> None:
         import tkinter as tk
 
-        c = {"bg": "#17181a", "card": "#1f2124", "text": "#e8e7e3",
-             "muted": "#8f9094", "border": "#2c2e32", "accent": "#7ea6c7"}
+        c = {"bg": "#17191C", "card": "#1F2124", "text": "#ECEEF1",
+             "muted": "#8B9098", "line": "#24272B", "accent": "#6E9BC4",
+             "ok": "#6FA983", "warn": "#D3B05E", "hot": "#CE9260", "risk": "#CC6C64"}
         lang = self.current_cfg["lang"]
         ext_version = read_repo_version()
         upd_time = repo_update_time()
 
         win = tk.Tk()
         win.title(f"{APP_NAME} v{ext_version}")
-        win.geometry("330x490")
+        win.geometry("330x330")
         win.resizable(False, False)
         win.attributes("-topmost", True)
         win.configure(bg=c["bg"])
@@ -1018,50 +1019,55 @@ class TrayApp:
 
         win.protocol("WM_DELETE_WINDOW", on_close)
 
-        tk.Label(win, text=f"{APP_NAME}  v{ext_version}", font=("Segoe UI", 13, "bold"),
-                 fg=c["text"], bg=c["bg"]).pack(anchor="w", padx=16, pady=(12, 0))
-        upd_lbl = tk.Label(win, text="", font=("Segoe UI", 8), fg=c["muted"], bg=c["bg"])
-        upd_lbl.pack(anchor="w", padx=16)
+        head = tk.Frame(win, bg=c["bg"])
+        head.pack(fill="x", padx=16, pady=(12, 0))
+        tk.Label(head, text=APP_NAME, font=("Segoe UI", 13, "bold"), fg=c["text"],
+                 bg=c["bg"]).pack(side="left")
+        tk.Label(head, text=f"v{ext_version}", font=("Segoe UI", 9), fg=c["muted"],
+                 bg=c["bg"]).pack(side="right")
         if upd_time:
-            upd_lbl.config(text=f"{self.tr('updated_at')}: {upd_time}")
-        plan_lbl = tk.Label(win, text="", font=("Segoe UI", 9), fg=c["accent"], bg=c["bg"])
-        plan_lbl.pack(anchor="w", padx=16, pady=(0, 4))
+            tk.Label(win, text=f"{self.tr('updated_at')}: {upd_time}", font=("Segoe UI", 9),
+                     fg=c["muted"], bg=c["bg"]).pack(anchor="w", padx=16)
 
-        blocks: dict[str, dict[str, Any]] = {}
+        # Кольцо-прогресс: расход сессии, в центре — остаток.
+        ring = tk.Canvas(win, width=112, height=112, bg=c["bg"], highlightthickness=0)
+        ring.pack(pady=(10, 0))
+        ring.create_oval(6, 6, 106, 106, outline=c["line"], width=9)
+        cap = tk.Label(win, text="", font=("Segoe UI", 10), fg=c["muted"], bg=c["bg"])
+        cap.pack(pady=(2, 0))
 
-        def make_block(key: str, title: str) -> None:
-            wrap = tk.Frame(win, bg=c["card"], highlightthickness=1,
-                            highlightbackground=c["border"])
-            wrap.pack(fill="x", padx=16, pady=6)
-            tk.Label(wrap, text=title.upper(), font=("Segoe UI", 8),
-                     fg=c["muted"], bg=c["card"]).pack(anchor="w", padx=12, pady=(8, 0))
-            val = tk.Label(wrap, text="—", font=("Segoe UI", 24, "bold"),
-                           fg=c["text"], bg=c["card"])
-            val.pack(anchor="w", padx=12)
-            canvas = tk.Canvas(wrap, height=8, bg=c["card"], highlightthickness=0)
-            canvas.pack(fill="x", padx=12, pady=(4, 0))
-            meta = tk.Label(wrap, text="", font=("Segoe UI", 9),
-                            fg=c["muted"], bg=c["card"], wraplength=270, justify="left")
-            meta.pack(anchor="w", padx=12, pady=(2, 8))
-            blocks[key] = {"wrap": wrap, "val": val, "canvas": canvas, "meta": meta}
+        rows = {}
 
-        make_block("s", self.tr("session"))
-        make_block("w", self.tr("weekly"))
+        def make_row(key: str, title: str) -> None:
+            wrap = tk.Frame(win, bg=c["bg"])
+            wrap.pack(fill="x", padx=16)
+            tk.Label(wrap, text=title, font=("Segoe UI", 10), fg=c["muted"],
+                     bg=c["bg"]).pack(side="left")
+            val = tk.Label(wrap, text="—", font=("Segoe UI", 12, "bold"), fg=c["text"],
+                           bg=c["bg"])
+            val.pack(side="right")
+            rows[key] = val
 
-        foot = tk.Label(win, text="", font=("Segoe UI", 9), fg=c["muted"],
-                        bg=c["bg"], wraplength=290, justify="left")
-        foot.pack(anchor="w", padx=16, pady=(4, 0))
+        tk.Frame(win, height=1, bg=c["line"]).pack(fill="x", padx=16, pady=(10, 2))
+        make_row("w", self.tr("weekly"))
+        make_row("mcp", self.tr("mcp"))
 
-        tk.Button(win, text=self.tr("refresh"), command=self.wake.set,
-                  bg=c["card"], fg=c["text"], activebackground=c["border"],
-                  activeforeground=c["text"], relief="flat", padx=14, pady=4,
-                  cursor="hand2").pack(pady=(6, 12))
+        foot = tk.Frame(win, bg=c["bg"])
+        foot.pack(fill="x", padx=16, pady=(10, 12))
+        foot_lbl = tk.Label(foot, text="", font=("Segoe UI", 9), fg=c["muted"], bg=c["bg"])
+        foot_lbl.pack(side="left")
+        tk.Button(foot, text="⟳", command=self.wake.set, bg=c["card"], fg=c["text"],
+                  activebackground=c["line"], activeforeground=c["text"], relief="flat",
+                  width=3, cursor="hand2").pack(side="right")
 
-        def draw_bar(canvas: Any, used: float, color: str) -> None:
-            canvas.delete("all")
-            width = max(canvas.winfo_width(), 100)
-            canvas.create_rectangle(0, 0, width, 8, fill=c["border"], width=0)
-            canvas.create_rectangle(0, 0, int(width * used / 100), 8, fill=color, width=0)
+        def color_for_used(used: float) -> str:
+            if used < 50:
+                return c["ok"]
+            if used < 75:
+                return c["warn"]
+            if used < 90:
+                return c["hot"]
+            return c["risk"]
 
         def tick() -> None:
             if self._detail_win is not win:
@@ -1073,36 +1079,39 @@ class TrayApp:
                 return
             d = self.state.snapshot()
             ok = bool(d.get("ok"))
-            plan_text = str(d.get("plan") or "")
-            plan_lbl.config(text=f"{'Тариф' if lang == 'ru' else 'Plan'}: {plan_text}"
-                            if plan_text else "")
-            for key in ("s", "w"):
-                b = blocks[key]
-                win_d = d.get(key) if ok else None
-                if not win_d:
-                    b["val"].config(text="—", fg=c["muted"])
-                    b["meta"].config(text=str(d.get("error") or self.tr("no_data"))[:80])
-                    b["canvas"].delete("all")
-                    continue
-                used = float(win_d["used"])
-                b["val"].config(text=f"{100 - int(used)}%", fg=color_for(used))
-                b["meta"].config(text=(
-                    f"{self.tr('used')}: {int(used)}% · "
-                    f"{self.tr('reset')} {fmt_countdown(win_d['resets_at'], lang)} "
-                    f"({fmt_at_time(win_d['resets_at'])})"
-                ))
-                draw_bar(b["canvas"], used, color_for(used))
-            if ok:
-                mcp = d.get("mcp")
-                extra = f" · MCP: {100 - int(mcp['used'])}% {self.tr('left')}" if mcp else ""
-                ts = d.get("ts") or time.time()
-                host = HOSTS.get(d.get("platform"), "")
-                foot.config(text=f"{self.tr('updated_at')}: "
-                                 f"{time.strftime('%H:%M:%S', time.localtime(ts))} · {host}{extra}")
+            s = d.get("s") if ok else None
+            if s:
+                used = float(s["used"])
+                ring.delete("arc")
+                ring.create_arc(6, 6, 106, 106, start=90, extent=-359.9 * (used / 100.0),
+                                style="arc", width=9, outline=color_for_used(used))
+                ring.itemconfigure("text", text=f"{100 - int(used)}%")
+                ring.itemconfigure("text2", text=self.tr("left"))
+                cap.config(text=f"{self.tr('session')} · {self.tr('reset')} "
+                                f"{fmt_countdown(s['resets_at'], lang)}")
             else:
-                foot.config(text=str(d.get("error") or "")[:90])
+                ring.itemconfigure("text", text="—")
+                ring.itemconfigure("text2", text="")
+                cap.config(text=self.tr("no_data") if not ok else "")
+            for key, label in (("w", "w"), ("mcp", "mcp")):
+                win_data = d.get(label) if ok else None
+                if win_data:
+                    used_w = float(win_data["used"])
+                    rows[key].config(text=f"{100 - int(used_w)}%",
+                                     fg=color_for_used(used_w))
+                else:
+                    rows[key].config(text="—", fg=c["muted"])
+            ts = d.get("ts")
+            host = HOSTS.get(d.get("platform"), "")
+            foot_lbl.config(text=(f"{time.strftime('%H:%M:%S', time.localtime(ts))} · {host}"
+                                  if ts else ""))
             win.after(1000, tick)
 
+        # Текст внутри кольца: два элемента (процент и подпись)
+        ring.create_text(56, 50, text="—", font=("Segoe UI", 21, "bold"), fill=c["text"],
+                         tags="text")
+        ring.create_text(56, 74, text="", font=("Segoe UI", 9), fill=c["muted"],
+                         tags="text2")
         tick()
         try:
             win.mainloop()

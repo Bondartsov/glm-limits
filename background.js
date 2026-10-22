@@ -80,7 +80,7 @@ async function getSettings() {
   // Ключа здесь нет: он живёт в keyring.js (session/зашифрованный).
   const r = await chrome.storage.local.get([
     "platform", "intervalSec", "viewMode", "lang", "notify",
-    "badge", "badgeMetric", "badgeMode"
+    "badge", "badgeMetric", "valueMode", "badgeMode"
   ]);
   return {
     platform: PLATFORMS.includes(r.platform) ? r.platform : DEFAULTS.platform,
@@ -90,7 +90,8 @@ async function getSettings() {
     notify: r.notify !== false,
     badge: r.badge !== false,
     badgeMetric: r.badgeMetric === "w" ? "w" : "s",
-    badgeMode: r.badgeMode === "used" ? "used" : "remaining",
+    // Режим показа чисел: остаток (по умолчанию) или израсходовано.
+    valueMode: (r.valueMode || r.badgeMode) === "used" ? "used" : "remaining",
   };
 }
 
@@ -269,8 +270,11 @@ async function poll() {
     await checkForUpdate(st);
     const apiKey = await GLMKeyring.getApiKey();
     if (!apiKey) {
-      // Нет ключа — это не ошибка API, backoff не включаем.
-      await chrome.storage.local.set({ latest: { ok: false, error: "No API key. Set it in settings.", ts: Date.now() } });
+      // Нет ключа — это не ошибка API, backoff не включаем. Попап покажет
+      // отдельное состояние «введите ключ», а не «Ошибка».
+      await chrome.storage.local.set({
+        latest: { ok: false, noKey: true, error: "", ts: Date.now() },
+      });
       noteSuccess();
       return null;
     }
@@ -405,9 +409,9 @@ async function updateBadge(st, fiveHour, sevenDay) {
       return;
     }
     const used = Math.max(0, Math.min(100, Math.round(win.utilization)));
-    // badgeMode: "remaining" (default) shows what is left, "used" shows spend.
-    // Color always follows the spend level — danger does not depend on wording.
-    const shown = st.badgeMode === "used" ? used : 100 - used;
+    // valueMode: "remaining" (по умолчанию) — осталось, "used" — расход.
+    // Цвет всегда по уровню расхода — опасность не зависит от формулировки.
+    const shown = st.valueMode === "used" ? used : 100 - used;
     await chrome.action.setBadgeBackgroundColor({ color: badgeColor(used) });
     try { await chrome.action.setBadgeTextColor({ color: "#ffffff" }); } catch (e) {}
     // "100" в бейдже Chrome обрезается — показываем "99+".

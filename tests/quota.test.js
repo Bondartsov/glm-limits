@@ -127,6 +127,23 @@ test("notifyDecision: новое окно сброса перезаряжает 
   assert.equal(d.threshold, 80, "в новом окне порог снова срабатывает");
 });
 
+test("dailyActivity: расход раскладывается по дням недели (Пн..Вс)", () => {
+  // Понедельник 2026-10-19 12:00 по местному
+  const mon = new Date(2026, 9, 19, 12, 0, 0).getTime();
+  const pts = [
+    { ts: mon - 3600e3, v: 10 },   // 11:00 пн
+    { ts: mon, v: 40 },             // 12:00 пн → +30
+    { ts: mon + 86400e3, v: 55 },   // вт → +15
+  ];
+  const buckets = GLMQuota.dailyActivity(pts, mon + 86400e3);
+  assert.equal(buckets.length, 7);
+  assert.equal(buckets[0].value, 30, "понедельник: прирост 30 в 12:00");
+  assert.equal(buckets[0].has, true);
+  assert.equal(buckets[1].value, 15, "вторник: прирост 15");
+  assert.equal(buckets[1].has, true);
+  assert.equal(buckets[2].has, false, "среда без расхода");
+});
+
 test("formatAmount: разделители разрядов по языку", () => {
   const norm = (s) => s.replace(/[  ]/g, " ");
   assert.equal(norm(GLMQuota.formatAmount(26913, "ru")), "26 913");

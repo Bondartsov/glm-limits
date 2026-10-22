@@ -157,10 +157,36 @@ const GLMQuota = (() => {
     return buckets.map((value, hour) => ({ hour, value, has: seen[hour] }));
   }
 
+  // Активность по дням недели: 7 столбцов (0 = понедельник … 6 = воскресенье),
+  // значение — сколько окна сожгли в этот день.
+  function dailyActivity(points, nowMs, windowDays) {
+    const days = windowDays || 7;
+    const now = nowMs || Date.now();
+    const start = now - days * 24 * 3600e3;
+    const buckets = new Array(7).fill(0);
+    const seen = new Array(7).fill(false);
+    const sorted = (Array.isArray(points) ? points : [])
+      .filter(p => p && typeof p.ts === "number" && typeof p.v === "number")
+      .slice()
+      .sort((a, b) => a.ts - b.ts);
+    for (let i = 1; i < sorted.length; i++) {
+      const prev = sorted[i - 1];
+      const cur = sorted[i];
+      if (cur.ts < start || cur.ts > now) continue;
+      const delta = cur.v - prev.v;
+      if (delta <= 0) continue;
+      const dow = (new Date(cur.ts).getDay() + 6) % 7;   // 0 = понедельник
+      buckets[dow] += delta;
+      seen[dow] = true;
+    }
+    return buckets.map((value, index) => ({ index, value, has: seen[index] }));
+  }
+
   const api = {
     TOKEN_TYPES, MONTHLY_TYPE, NOTIFY_THRESHOLDS, BADGE_COLORS,
     toNumber, normalizeWindow, parseLimits, detectPlatform,
-    badgeColor, badgeText, notifyDecision, formatAmount, hourlyActivity,
+    badgeColor, badgeText, notifyDecision, formatAmount,
+    hourlyActivity, dailyActivity,
   };
 
   if (typeof globalThis !== "undefined") globalThis.GLMQuota = api;
