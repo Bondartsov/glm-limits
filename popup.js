@@ -12,6 +12,10 @@ const I18N = {
     session: "Session (5h)", weekly: "Weekly", mcp: "MCP",
     apiKey: "API Key",
     apiKeyHint: "Your GLM Coding Plan API key. Stored locally, sent only to the quota endpoint.",
+    keyPersist: "Remember on this device (encrypted)",
+    keyStateNone: "No key set",
+    keyStateSession: "Key is in memory only — it disappears when the browser closes",
+    keyStatePersisted: "Key is saved encrypted (still readable via this extension's DevTools)",
     platform: "Platform",
     platformAuto: "Auto",
     platformCn: "China · open.bigmodel.cn",
@@ -45,6 +49,10 @@ const I18N = {
     session: "Сессия (5ч)", weekly: "Неделя", mcp: "MCP",
     apiKey: "API-ключ",
     apiKeyHint: "Ваш API-ключ GLM Coding Plan. Хранится локально, уходит только на endpoint квот.",
+    keyPersist: "Запомнить на этом устройстве (шифровать)",
+    keyStateNone: "Ключ не задан",
+    keyStateSession: "Ключ только в памяти — исчезнет после закрытия браузера",
+    keyStatePersisted: "Ключ сохранён в зашифрованном виде (но доступен через DevTools расширения)",
     platform: "Платформа",
     platformAuto: "Авто",
     platformCn: "Китай · open.bigmodel.cn",
@@ -225,10 +233,21 @@ function showMetric(elId, pctId, barId, resetId, data, sparkId, series) {
   pct.style.color = levelColor(100 - remaining);
   bar.style.width = remaining + "%";
   bar.style.background = levelColor(100 - remaining);
-  // Utilization annotation — how much is spent.
+  // Utilization annotation — сколько израсходовано. Если API отдаёт
+  // абсолютные значения (usage/currentValue) — показываем их.
   const annoId = elId.replace("metric", "").toLowerCase() + "Anno";
   const anno = $(annoId);
-  if (anno) anno.textContent = t("utilSpent") + " " + used.toFixed(0) + "%";
+  if (anno) {
+    const spent = data.spent, total = data.total;
+    if (spent != null && total != null) {
+      const spentTxt = GLMQuota.formatAmount(spent, currentLang);
+      const totalTxt = GLMQuota.formatAmount(total, currentLang);
+      anno.textContent = t("utilSpent") + " " + spentTxt + " / " + totalTxt +
+        " (" + used.toFixed(0) + "%)";
+    } else {
+      anno.textContent = t("utilSpent") + " " + used.toFixed(0) + "%";
+    }
+  }
   // Usage sparkline — drawn from the local history when there are enough points.
   if (sparkId) renderSparkline($(sparkId), series || []);
   // Reset countdown — nextResetTime is epoch ms.
@@ -350,11 +369,12 @@ function applyTheme(theme) {
 // ── Settings ──────────────────────────────────────────────
 async function loadSettings() {
   const r = await chrome.storage.local.get([
-    "apiKey", "platform", "intervalSec", "viewMode",
+    "platform", "intervalSec", "viewMode",
     "lang", "theme", "showMcp", "notify", "badge", "badgeMetric", "badgeMode"
   ]);
+  const persisted = await GLMKeyring.hasPersistedKey();
+  const hasKey = Boolean(await GLMKeyring.getApiKey());
   currentSettings = {
-    apiKey: r.apiKey || "",
     platform: normalizePlatform(r.platform),
     intervalSec: r.intervalSec || 120,
     viewMode: normalizeViewMode(r.viewMode),
@@ -364,11 +384,11 @@ async function loadSettings() {
     notify: r.notify !== false,
     badge: r.badge !== false,
     badgeMetric: r.badgeMetric === "w" ? "w" : "s",
-    badgeMode: r.badgeMode === "used" ? "used" : "remaining"
+    badgeMode: r.badgeMode === "used" ? "used" : "remaining",
+    keyPersist: persisted
   };
   currentLang = currentSettings.lang;
 
-  $("apiKeyInput").value = currentSettings.apiKey;
   $("platformSelect").value = currentSettings.platform;
   $("intervalInput").value = currentSettings.intervalSec;
   $("viewModeSelect").value = currentSettings.viewMode;
@@ -379,6 +399,14 @@ async function loadSettings() {
   $("badgeCheck").checked = currentSettings.badge;
   $("badgeMetricSelect").value = currentSettings.badgeMetric;
   $("badgeModeSelect").value = currentSettings.badgeMode;
+  $("keyPersistCheck").checked = persisted;
+
+  // Сам ключ никогда не показываем и не подставляем в поле — только статус.
+  $("apiKeyInput").value = "";
+  $("apiKeyInput").placeholder = hasKey ? "••••••••" : "glm_… / zai_…";
+  $("keyState").textContent = !hasKey
+    ? t("keyStateNone")
+    : (persisted ? t("keyStatePersisted") : t("keyStateSession"));
 
   applyI18n();
   applyTheme(currentSettings.theme);
@@ -386,8 +414,16 @@ async function loadSettings() {
 }
 
 async function saveSettings() {
+  // Ключ: пустое поле = оставить текущий, не удалять.
+  const keyValue = $("apiKeyInput").value.trim();
+  const persist = $("keyPersistCheck").checked;
+  if (keyValue) {
+    await GLMKeyring.setApiKey(keyValue, persist);
+  } else {
+    const currentKey = await GLMKeyring.getApiKey();
+    if (currentKey) await GLMKeyring.setApiKey(currentKey, persist);
+  }
   currentSettings = {
-    apiKey: $("apiKeyInput").value.trim(),
     platform: normalizePlatform($("platformSelect").value),
     intervalSec: parseInt($("intervalInput").value) || 120,
     viewMode: normalizeViewMode($("viewModeSelect").value),
@@ -397,7 +433,8 @@ async function saveSettings() {
     notify: $("notifyCheck").checked,
     badge: $("badgeCheck").checked,
     badgeMetric: $("badgeMetricSelect").value,
-    badgeMode: $("badgeModeSelect").value
+    badgeMode: $("badgeModeSelect").value,
+    keyPersist: persist
   };
   await chrome.storage.local.set(currentSettings);
   currentLang = currentSettings.lang;
@@ -407,11 +444,13 @@ async function saveSettings() {
   // Notify background to apply new settings (await so storage is flushed first)
   try { await chrome.runtime.sendMessage({ type: "applySettings" }); } catch (e) {}
   await poll();
+  await loadSettings();   // обновить статус ключа и плейсхолдер
 }
 
 async function resetSettings() {
+  await GLMKeyring.clearApiKey();
   await chrome.storage.local.remove([
-    "apiKey", "platform", "intervalSec", "viewMode",
+    "platform", "intervalSec", "viewMode",
     "lang", "theme", "showMcp", "notify", "badge", "badgeMetric", "badgeMode"
   ]);
   await loadSettings();

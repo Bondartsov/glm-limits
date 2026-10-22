@@ -25,6 +25,7 @@ GLM_API_KEY / ZAI_API_KEY / BIGMODEL_API_KEY / ZHIPUAI_API_KEY).
 """
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -76,6 +77,9 @@ except Exception as exc:  # noqa: BLE001 — ловим всё, чтобы за�
 # Пороги уведомлений о расходе сессии (по возрастанию) — по одному уведомлению
 # на порог в пределах одного окна сброса.
 NOTIFY_THRESHOLDS = (80, 90, 100)
+
+# Backoff при ошибках API: максимальный интервал между опросами.
+BACKOFF_MAX_SEC = 1800
 
 logger = logging.getLogger("glm-limits.tray")
 
@@ -152,6 +156,109 @@ def setup_logging() -> None:
     logger.addHandler(sh)
 
 
+def protect_secret(plain: bytes) -> bytes | None:
+    """Шифрует секрет средствами Windows (DPAPI): расшифровать сможет только
+    текущий пользователь этой машины. None — если DPAPI недоступен."""
+    if not plain:
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class DATA_BLOB(ctypes.Structure):
+            _fields_ = [("cbData", wintypes.DWORD),
+                        ("pbData", ctypes.POINTER(ctypes.c_ubyte))]
+
+        crypt32 = ctypes.WinDLL("crypt32", use_last_error=True)
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        crypt32.CryptProtectData.argtypes = [
+            ctypes.POINTER(DATA_BLOB), wintypes.LPCWSTR, ctypes.POINTER(DATA_BLOB),
+            ctypes.c_void_p, ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(DATA_BLOB)]
+        crypt32.CryptProtectData.restype = wintypes.BOOL
+        kernel32.LocalFree.argtypes = [wintypes.HLOCAL]
+
+        buf = ctypes.create_string_buffer(plain, len(plain))
+        in_blob = DATA_BLOB(len(plain), ctypes.cast(buf, ctypes.POINTER(ctypes.c_ubyte)))
+        out_blob = DATA_BLOB()
+        if not crypt32.CryptProtectData(ctypes.byref(in_blob), "GLM Limits", None, None,
+                                        None, 0x01, ctypes.byref(out_blob)):
+            logger.error("CryptProtectData: ошибка %s", ctypes.get_last_error())
+            return None
+        try:
+            return ctypes.string_at(out_blob.pbData, out_blob.cbData)
+        finally:
+            kernel32.LocalFree(out_blob.pbData)
+    except Exception:
+        logger.exception("DPAPI: не удалось зашифровать")
+        return None
+
+
+def unprotect_secret(blob: bytes) -> bytes | None:
+    """Расшифровка секрета, защищённого DPAPI (тот же пользователь Windows)."""
+    if not blob:
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class DATA_BLOB(ctypes.Structure):
+            _fields_ = [("cbData", wintypes.DWORD),
+                        ("pbData", ctypes.POINTER(ctypes.c_ubyte))]
+
+        crypt32 = ctypes.WinDLL("crypt32", use_last_error=True)
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        crypt32.CryptUnprotectData.argtypes = [
+            ctypes.POINTER(DATA_BLOB), ctypes.POINTER(wintypes.LPWSTR),
+            ctypes.POINTER(DATA_BLOB), ctypes.c_void_p, ctypes.c_void_p,
+            wintypes.DWORD, ctypes.POINTER(DATA_BLOB)]
+        crypt32.CryptUnprotectData.restype = wintypes.BOOL
+        kernel32.LocalFree.argtypes = [wintypes.HLOCAL]
+
+        buf = ctypes.create_string_buffer(blob, len(blob))
+        in_blob = DATA_BLOB(len(blob), ctypes.cast(buf, ctypes.POINTER(ctypes.c_ubyte)))
+        out_blob = DATA_BLOB()
+        if not crypt32.CryptUnprotectData(ctypes.byref(in_blob), None, None, None, None,
+                                          0x01, ctypes.byref(out_blob)):
+            logger.error("CryptUnprotectData: ошибка %s", ctypes.get_last_error())
+            return None
+        try:
+            return ctypes.string_at(out_blob.pbData, out_blob.cbData)
+        finally:
+            kernel32.LocalFree(out_blob.pbData)
+    except Exception:
+        logger.exception("DPAPI: не удалось расшифровать")
+        return None
+
+
+def _read_config_raw() -> dict[str, Any]:
+    """Читает конфиг как есть (без разбора ключа)."""
+    if not CONFIG_PATH.exists():
+        return {}
+    try:
+        data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        logger.exception("Не удалось прочитать конфиг %s", CONFIG_PATH)
+        return {}
+
+
+def write_protected_key(key: str) -> bool:
+    """Сохраняет ключ в конфиг в зашифрованном (DPAPI) виде."""
+    blob = protect_secret(key.encode("utf-8"))
+    if not blob:
+        return False
+    data = _read_config_raw()
+    data.pop("apiKey", None)
+    data["apiKeyProtected"] = base64.b64encode(blob).decode("ascii")
+    try:
+        CONFIG_PATH.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return True
+    except OSError:
+        logger.exception("Не удалось записать конфиг")
+        return False
+
+
 def detect_platform(key: str) -> str:
     """Эвристика платформы — та же, что в background.js расширения."""
     k = (key or "").strip()
@@ -165,15 +272,31 @@ def detect_platform(key: str) -> str:
 
 
 def load_config() -> dict[str, Any]:
-    """Читает tray_config.json; ключ можно задать и через переменные окружения."""
-    cfg: dict[str, Any] = {}
-    if CONFIG_PATH.exists():
+    """Читает tray_config.json. Ключ хранится зашифрованным (Windows DPAPI) —
+    прочитать его может только текущий пользователь этой машины. Fallback:
+    переменные окружения."""
+    cfg = _read_config_raw()
+
+    stored_key = ""
+    if cfg.get("apiKeyProtected"):
         try:
-            cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            logger.exception("Не удалось прочитать конфиг %s", CONFIG_PATH)
+            blob = base64.b64decode(cfg["apiKeyProtected"])
+        except (ValueError, TypeError):
+            logger.exception("Повреждён зашифрованный ключ в конфиге")
+            blob = b""
+        plain = unprotect_secret(blob)
+        if plain:
+            stored_key = plain.decode("utf-8", "replace")
+        else:
+            logger.error("Ключ не расшифровывается (нужен тот же пользователь Windows) — введите его заново")
+    elif cfg.get("apiKey"):
+        # Миграция со старого формата: сразу перешифровываем.
+        stored_key = str(cfg["apiKey"]).strip()
+        if stored_key and write_protected_key(stored_key):
+            logger.info("Ключ мигрирован в зашифрованный формат (DPAPI)")
+
     api_key = str(
-        cfg.get("apiKey")
+        stored_key
         or os.environ.get("GLM_API_KEY")
         or os.environ.get("ZAI_API_KEY")
         or os.environ.get("BIGMODEL_API_KEY")
@@ -522,6 +645,7 @@ class TrayApp:
 
     # ── поток опроса ─────────────────────────────────────────
     def poll_worker(self) -> None:
+        streak = 0
         while not self.stop_evt.is_set():
             interval = 120
             try:
@@ -535,6 +659,8 @@ class TrayApp:
                         data = fetch_quota(cfg["apiKey"], cfg["platform"])
                         self.state.set(data)
                         self.check_notifications(cfg, data)
+                        streak = 0
+                        interval = cfg["intervalSec"]
                         logger.info(
                             "Опрос ок (platform=%s): сессия %s%%, неделя %s%%",
                             data.get("platform"),
@@ -542,7 +668,14 @@ class TrayApp:
                             int(data["w"]["used"]) if data.get("w") else -1,
                         )
                     except Exception as exc:
-                        logger.exception("Опрос не удался")
+                        # Backoff: при серии ошибок отдаляем опрос (до 30 минут).
+                        streak += 1
+                        interval = min(
+                            cfg["intervalSec"] * (2 ** min(streak - 1, 4)),
+                            BACKOFF_MAX_SEC,
+                        )
+                        logger.warning("Ошибка опроса (подряд %s), следующий через %sс: %s",
+                                       streak, interval, exc)
                         self.state.set({"ok": False, "error": str(exc)[:200], "ts": time.time()})
                 self.refresh_icon()
             except Exception:
@@ -694,22 +827,14 @@ class TrayApp:
                 self._notify_tray(s["key_empty"])
                 on_close()
                 return
-            try:
-                data = json.loads(CONFIG_PATH.read_text(encoding="utf-8")) \
-                    if CONFIG_PATH.exists() else {}
-            except (OSError, json.JSONDecodeError):
-                data = {}
-            data["apiKey"] = new_key
-            try:
-                CONFIG_PATH.write_text(
-                    json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-                )
-                logger.info("API-ключ обновлён через диалог трея")
-                self._notify_tray(s["key_saved"])
-                self.wake.set()  # сразу опросить с новым ключом
-            except OSError:
-                logger.exception("Не удалось записать конфиг")
+            if not write_protected_key(new_key):
+                logger.error("Не удалось сохранить ключ в зашифрованном виде")
                 self._notify_tray(f"{s['error']}: {CONFIG_PATH.name}")
+                on_close()
+                return
+            logger.info("API-ключ обновлён через диалог трея (зашифрован, DPAPI)")
+            self._notify_tray(s["key_saved"])
+            self.wake.set()  # сразу опросить с новым ключом
             on_close()
 
         row = tk.Frame(win, bg="#17181a")

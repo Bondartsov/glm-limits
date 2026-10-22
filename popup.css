@@ -263,6 +263,17 @@ body {
   margin-top: 4px;
   line-height: 1.4;
 }
+.key-state { color: var(--accent); }
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+.check-row input[type="checkbox"] { width: auto; margin: 0; }
 
 .actions-row { display: flex; gap: 8px; margin-top: 16px; }
 .btn-primary {

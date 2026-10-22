@@ -123,7 +123,12 @@
 
       <div class="field">
         <label data-i18n="apiKey">API Key</label>
-        <input type="password" id="apiKeyInput" placeholder="glm_… / zai_…">
+        <input type="password" id="apiKeyInput" placeholder="glm_… / zai_…" autocomplete="off">
+        <small id="keyState" class="key-state"></small>
+        <label class="check-row">
+          <input type="checkbox" id="keyPersistCheck">
+          <span data-i18n="keyPersist">Remember on this device (encrypted)</span>
+        </label>
         <small data-i18n="apiKeyHint">Your GLM Coding Plan API key. Never shared.</small>
       </div>
 
@@ -205,6 +210,8 @@
     </div>
   </div>
 
+  <script src="quota.js"></script>
+  <script src="keyring.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

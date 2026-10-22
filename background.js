@@ -3,6 +3,10 @@
 // keeps a usage history for the sparkline and fires one-shot 80/90% session notifications.
 // Settings: platform (auto-detected from the key), poll interval, view mode, notifications.
 
+// Чистая логика разбора квот вынесена в quota.js — её же тестируют node-тесты.
+importScripts("quota.js");
+importScripts("keyring.js");
+
 const DEFAULTS = { apiKey: "", intervalSec: 120, viewMode: "popup", platform: "auto", notify: true };
 const VIEW_MODES = ["popup", "window", "compact"];
 const PLATFORMS = ["auto", "cn", "intl"];
@@ -29,22 +33,42 @@ const API_TIMEOUT_MS = 15000;
 // onInstalled/onStartup all can fire at once).
 let pollInFlight = false;
 
-// Session usage thresholds for one-shot notifications, highest first.
-// One notification per threshold per reset window — no per-percent spam.
-const NOTIFY_THRESHOLDS = [
-  { at: 100, flag: "s100" },
-  { at: 90, flag: "s90" },
-  { at: 80, flag: "s80" },
-];
+// Backoff: при серии ошибок API опрос отдаляется (до 30 минут), чтобы не
+// долбить сервер и не жечь батарею.
+let pollBaseSec = 120;
+let pollEffectiveSec = 120;
+let failStreak = 0;
+const BACKOFF_MAX_SEC = 1800;
+
+function applyAlarm() {
+  chrome.alarms.create("poll", { periodInMinutes: Math.max(0.5, pollEffectiveSec / 60) });
+}
+
+function noteFailure() {
+  failStreak = Math.min(failStreak + 1, 6);
+  pollEffectiveSec = Math.min(pollBaseSec * Math.pow(2, failStreak - 1), BACKOFF_MAX_SEC);
+  console.info("[GLM Limits] API failed x" + failStreak + " — следующий опрос через " + pollEffectiveSec + "с");
+  applyAlarm();
+}
+
+function noteSuccess() {
+  if (failStreak > 0) {
+    failStreak = 0;
+    pollEffectiveSec = pollBaseSec;
+    applyAlarm();
+  }
+}
+
+// Пороги уведомлений и разбор окон живут в quota.js (покрыты тестами).
 
 async function getSettings() {
   // Flat keys — must match popup.js loadSettings/saveSettings.
+  // Ключа здесь нет: он живёт в keyring.js (session/зашифрованный).
   const r = await chrome.storage.local.get([
-    "apiKey", "platform", "intervalSec", "viewMode", "lang", "notify",
+    "platform", "intervalSec", "viewMode", "lang", "notify",
     "badge", "badgeMetric", "badgeMode"
   ]);
   return {
-    apiKey: r.apiKey || DEFAULTS.apiKey,
     platform: PLATFORMS.includes(r.platform) ? r.platform : DEFAULTS.platform,
     intervalSec: r.intervalSec || DEFAULTS.intervalSec,
     viewMode: VIEW_MODES.includes(r.viewMode) ? r.viewMode : DEFAULTS.viewMode,
@@ -58,8 +82,9 @@ async function getSettings() {
 
 async function applySettings() {
   const s = await getSettings();
-  const minutes = Math.max(0.5, (s.intervalSec || 120) / 60);
-  chrome.alarms.create("poll", { periodInMinutes: minutes });
+  pollBaseSec = s.intervalSec || 120;
+  if (failStreak === 0) pollEffectiveSec = pollBaseSec;
+  applyAlarm();
   const mode = VIEW_MODES.includes(s.viewMode) ? s.viewMode : "popup";
   try { await chrome.action.setPopup({ popup: mode === "window" ? "" : "popup.html" }); } catch (e) {}
 }
@@ -72,13 +97,9 @@ function openWindow() {
 // Guess the platform from the key shape:
 //  - bigmodel.cn keys use the "id.secret" form and contain a dot;
 //  - z.ai keys are opaque strings (may carry a "zai" prefix).
-//  Unknown shape → international.
+//  Unknown shape → international. Логика живёт в quota.js (покрыта тестами).
 function detectPlatform(key) {
-  const k = (key || "").trim();
-  if (!k) return "cn";
-  if (/^zai[_-]/i.test(k)) return "intl";
-  if (k.includes(".")) return "cn";
-  return "intl";
+  return GLMQuota.detectPlatform(key);
 }
 
 async function getJSON(url, apiKey) {
@@ -103,14 +124,9 @@ async function getJSON(url, apiKey) {
 
 // Parse one limit entry into { utilization (0-100), resetsAt (ISO) }.
 // GLM reports percentage as "used" (e.g. 16.0 = 16% used).
+// Логика живёт в quota.js (покрыта тестами).
 function normalizeWindow(item) {
-  const pct = Number(item && item.percentage) || 0;
-  const resetMs = item && item.nextResetTime;
-  let resetsAt = null;
-  if (resetMs && Number(resetMs) > 0) {
-    resetsAt = new Date(Number(resetMs)).toISOString();
-  }
-  return { utilization: Math.min(Math.max(pct, 0), 100), resetsAt };
+  return GLMQuota.normalizeWindow(item);
 }
 
 // Self-update for the unpacked flow, in two steps:
@@ -177,50 +193,28 @@ async function poll() {
   try {
     const st = await getSettings();
     await checkForUpdate(st);
-    if (!st.apiKey || !st.apiKey.trim()) {
+    const apiKey = await GLMKeyring.getApiKey();
+    if (!apiKey) {
+      // Нет ключа — это не ошибка API, backoff не включаем.
       await chrome.storage.local.set({ latest: { ok: false, error: "No API key. Set it in settings.", ts: Date.now() } });
-      throw new Error("no api key");
+      noteSuccess();
+      return null;
     }
     // Resolve "auto" (and any stale stored value) into a concrete platform.
     const platform = st.platform === "auto" || !HOSTS[st.platform]
-      ? detectPlatform(st.apiKey)
+      ? detectPlatform(apiKey)
       : st.platform;
-    const body = await getJSON(HOSTS[platform] + QUOTA_PATH, st.apiKey.trim());
+    const body = await getJSON(HOSTS[platform] + QUOTA_PATH, apiKey);
 
     const data = body && body.data;
     const limits = (data && Array.isArray(data.limits)) ? data.limits : [];
 
-    let fiveHour = null;
-    let sevenDay = null;
-    let mcp = null;
-
-    for (const item of limits) {
-      if (!item || typeof item !== "object") continue;
-
-      // TIME_LIMIT = monthly prompt/request window (optional meter).
-      if (item.type === "TIME_LIMIT") {
-        mcp = normalizeWindow(item);
-        continue;
-      }
-      // Окна тарифа приходят и как TOKENS_LIMIT, и как CREDIT_LIMIT
-      // (кредитные окна bigmodel.cn: usage = лимит, currentValue = потрачено) —
-      // семантика percentage/unit/number та же.
-      if (item.type !== "TOKENS_LIMIT" && item.type !== "CREDIT_LIMIT") continue;
-
-      const unit = Number(item.unit);
-      const number = Number(item.number);
-      const norm = normalizeWindow(item);
-
-      if (unit === 3 && number === 5) {
-        fiveHour = norm;          // session / 5h token window
-      } else if (unit === 6 && number === 1) {
-        sevenDay = norm;          // weekly token window
-      } else if (!fiveHour && unit === 3) {
-        fiveHour = norm;          // fallback: any hourly window
-      } else if (!sevenDay && unit === 6) {
-        sevenDay = norm;          // fallback: any weekly window
-      }
-    }
+    // Разбор окон вынесен в quota.js: TOKENS_LIMIT / CREDIT_LIMIT (сессия и
+    // неделя) и TIME_LIMIT (месячный MCP).
+    const windows = GLMQuota.parseLimits(limits);
+    const fiveHour = windows.session;
+    const sevenDay = windows.weekly;
+    const mcp = windows.mcp;
 
     // Побочные эффекты изолируем: сбой истории/уведомления/бейджа не должен
     // мешать обновить основной кэш latest.
@@ -256,9 +250,11 @@ async function poll() {
       raw: (data && Array.isArray(data.limits)) ? data.limits : null,
     };
     await chrome.storage.local.set({ latest });
+    noteSuccess();
     return latest;
   } catch (e) {
     await chrome.storage.local.set({ latest: { ok: false, error: String(e), ts: Date.now() } });
+    noteFailure();
     throw e;
   } finally {
     pollInFlight = false;
@@ -296,23 +292,12 @@ async function maybeNotify(st, fiveHour) {
   const winKey = fiveHour.resetsAt ||
     ("slot:" + Math.floor(Date.now() / (5 * 3600 * 1000)));
   const stg = await chrome.storage.local.get("notifState");
-  let ns = stg.notifState;
-  if (!ns || ns.winKey !== winKey) {
-    ns = { winKey, s80: false, s90: false, s100: false };
+  // Решение «звучать ли и о каком пороге» — чистая функция в quota.js.
+  const decision = GLMQuota.notifyDecision(stg.notifState, used, winKey);
+  if (decision.threshold != null) {
+    fireNotification(st.lang, used, decision.threshold);
   }
-  for (const th of NOTIFY_THRESHOLDS) {
-    if (used >= th.at && !ns[th.flag]) {
-      ns[th.flag] = true;
-      // Порог пройден — нижние считаем пройденными тоже: одно уведомление
-      // вместо каскада 80 → 90 → 100.
-      for (const other of NOTIFY_THRESHOLDS) {
-        if (other.at <= th.at) ns[other.flag] = true;
-      }
-      fireNotification(st.lang, used, th.at);
-      break; // at most one notification per poll
-    }
-  }
-  await chrome.storage.local.set({ notifState: ns });
+  await chrome.storage.local.set({ notifState: decision.state });
 }
 
 function fireNotification(lang, used, threshold) {
@@ -335,10 +320,7 @@ function fireNotification(lang, used, threshold) {
 // the same thresholds as the bars (50/75/90). Hex literals — no DOM/CSS vars
 // inside the service worker.
 function badgeColor(used) {
-  if (used < 50) return "#5a9367";
-  if (used < 75) return "#c2a14a";
-  if (used < 90) return "#bf7a40";
-  return "#b5524c";
+  return GLMQuota.badgeColor(used);
 }
 
 async function updateBadge(st, fiveHour, sevenDay) {
@@ -354,7 +336,8 @@ async function updateBadge(st, fiveHour, sevenDay) {
     const shown = st.badgeMode === "used" ? used : 100 - used;
     await chrome.action.setBadgeBackgroundColor({ color: badgeColor(used) });
     try { await chrome.action.setBadgeTextColor({ color: "#ffffff" }); } catch (e) {}
-    await chrome.action.setBadgeText({ text: String(shown) });
+    // "100" в бейдже Chrome обрезается — показываем "99+".
+    await chrome.action.setBadgeText({ text: GLMQuota.badgeText(shown) });
   } catch (e) {}
 }
 

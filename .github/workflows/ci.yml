@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: JS-тесты (разбор квот, пороги, бейдж)
+        run: node --test
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Зависимости для тестов трея
+        run: python -m pip install --quiet requests
+
+      - name: Python-тесты (трей: парсинг, уведомления, DPAPI)
+        run: python -m unittest discover -s tests -p "test_*.py" -v
+
+      - name: Проверка синтаксиса расширения
+        run: node --check background.js && node --check popup.js && node --check quota.js && node --check keyring.js
+
+      - name: Проверка синтаксиса трея
+        run: python -m py_compile tray/tray_glm_limits.pyw

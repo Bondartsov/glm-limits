@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GLM Limits — макет редизайна</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  /* Токены предложенной палитры */
+  html[data-theme="light"] {
+    --canvas: #F7F8F9; --surface: #FFFFFF; --line: #E7E9EC;
+    --text: #17191C; --muted: #71767D; --accent: #3E6E9C; --accent-soft: #EAF0F6;
+    --ok: #5E9E73; --warn: #C9A24B; --hot: #C2854B; --risk: #C25F58;
+    --track: #ECEEF0; --page: #E9EBED;
+  }
+  html[data-theme="dark"] {
+    --canvas: #101214; --surface: #17191C; --line: #24272B;
+    --text: #ECEEF1; --muted: #8B9098; --accent: #6E9BC4; --accent-soft: #1E262E;
+    --ok: #6FA983; --warn: #D3B05E; --hot: #CE9260; --risk: #CC6C64;
+    --track: #24272B; --page: #0A0B0C;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--page); color: var(--text);
+    padding: 36px 24px 60px; -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 20px; font-weight: 650; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); font-size: 13px; margin: 6px 0 24px; }
+  .toolbar { display: flex; gap: 8px; margin-bottom: 28px; }
+  button {
+    font: inherit; font-size: 13px; padding: 7px 13px; border-radius: 8px;
+    border: 1px solid var(--line); background: var(--surface); color: var(--text);
+    cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  .row { display: flex; gap: 36px; flex-wrap: wrap; }
+  .col-label { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+  .note { font-size: 12px; color: var(--muted); margin-top: 10px; line-height: 1.5; max-width: 340px; }
+
+  /* ── Попап расширения ─────────────────────────── */
+  .popup {
+    width: 360px; background: var(--canvas); border: 1px solid var(--line);
+    border-radius: 14px; overflow: hidden; box-shadow: 0 12px 32px rgba(0,0,0,.10);
+  }
+  .popup-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 11px 14px; background: var(--surface); border-bottom: 1px solid var(--line);
+  }
+  .brand { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 650; }
+  .mark { width: 17px; height: 17px; border-radius: 5px; background: var(--accent);
+          display: grid; grid-template-columns: repeat(3, 2px); gap: 1.5px; align-items: end;
+          padding: 4px; }
+  .mark i { display: block; background: #fff; border-radius: 1px; }
+  .mark i:nth-child(1) { height: 5px; opacity: .7; }
+  .mark i:nth-child(2) { height: 8px; opacity: .85; }
+  .mark i:nth-child(3) { height: 11px; }
+  .icons { display: flex; gap: 2px; }
+  .icons span { width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center;
+                color: var(--muted); font-size: 13px; }
+  .icons span:hover { background: var(--accent-soft); color: var(--text); }
+  .statusbar { display: flex; align-items: center; gap: 7px; padding: 9px 16px 0;
+               font-size: 12px; color: var(--muted); }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
+  .body { padding: 14px 16px 16px; }
+  .hero-label { font-size: 13px; color: var(--muted); }
+  .hero { display: flex; align-items: baseline; gap: 6px; margin-top: 2px; }
+  .hero b { font-size: 44px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .hero span { font-size: 15px; color: var(--muted); }
+  .sub-note { font-size: 12px; color: var(--muted); margin-top: 3px; font-variant-numeric: tabular-nums; }
+  .bar { height: 6px; border-radius: 3px; background: var(--track); margin-top: 11px; overflow: hidden; }
+  .bar i { display: block; height: 100%; border-radius: 3px; background: var(--ok); }
+  .spark { display: block; width: 100%; height: 30px; margin-top: 9px; }
+  .spark path { fill: none; stroke: var(--muted); stroke-width: 1.2; }
+  .reset { font-size: 12px; color: var(--muted); margin-top: 7px; font-variant-numeric: tabular-nums; }
+  .rows { margin-top: 18px; border-top: 1px solid var(--line); }
+  .rowline { display: flex; align-items: center; gap: 10px; padding: 11px 0;
+             border-bottom: 1px solid var(--line); }
+  .rowline .lbl { font-size: 13px; color: var(--text); width: 62px; }
+  .rowline .mini { flex: 1; height: 4px; border-radius: 2px; background: var(--track); overflow: hidden; }
+  .rowline .mini i { display: block; height: 100%; background: var(--ok); }
+  .rowline .val { font-size: 14px; font-weight: 600; width: 42px; text-align: right;
+                  font-variant-numeric: tabular-nums; }
+  .rowline .when { font-size: 11px; color: var(--muted); width: 92px; text-align: right;
+                   font-variant-numeric: tabular-nums; }
+  .foot { padding: 9px 16px; background: var(--surface); border-top: 1px solid var(--line);
+          font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; }
+
+  /* ── Окно трея ─────────────────────────────────── */
+  .tray {
+    width: 320px; background: var(--canvas); border: 1px solid var(--line);
+    border-radius: 12px; overflow: hidden; box-shadow: 0 12px 32px rgba(0,0,0,.10);
+  }
+  .tray-head { padding: 12px 16px 0; display: flex; justify-content: space-between;
+               align-items: baseline; }
+  .tray-head b { font-size: 14px; font-weight: 650; }
+  .tray-head span { font-size: 11px; color: var(--muted); }
+  .tray-ver { padding: 2px 16px 0; font-size: 11px; color: var(--muted); }
+  .ring-wrap { display: flex; flex-direction: column; align-items: center; padding: 16px 0 10px; }
+  .ring { position: relative; width: 108px; height: 108px; border-radius: 50%;
+          background: conic-gradient(var(--ok) 0 33%, var(--track) 33% 100%); }
+  .ring > span { position: absolute; inset: 9px; border-radius: 50%; background: var(--canvas);
+                 display: grid; place-items: center; font-size: 25px; font-weight: 600;
+                 font-variant-numeric: tabular-nums; }
+  .ring-cap { font-size: 12px; color: var(--muted); margin-top: 9px; }
+  .tray-rows { padding: 4px 16px 10px; }
+  .trow { display: flex; justify-content: space-between; align-items: center;
+          padding: 7px 0; border-top: 1px solid var(--line); font-size: 13px; }
+  .trow .v { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .tray-foot { display: flex; justify-content: space-between; align-items: center;
+               padding: 9px 16px; background: var(--surface); border-top: 1px solid var(--line);
+               font-size: 11px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>GLM Limits — макет редизайна</h1>
+  <p class="sub">Целевой вид: нейтральная палитра, один герой-экран, компактные строки вместо блоков, кольцо вместо полосы в трее.</p>
+
+  <div class="toolbar">
+    <button onclick="document.documentElement.dataset.theme='light'">Светлая</button>
+    <button onclick="document.documentElement.dataset.theme='dark'">Тёмная</button>
+  </div>
+
+  <div class="row">
+    <div>
+      <div class="col-label">Расширение — попап (360 px)</div>
+      <div class="popup">
+        <div class="popup-head">
+          <div class="brand"><span class="mark"><i></i><i></i><i></i></span>GLM Limits</div>
+          <div class="icons"><span>↻</span><span>⤡</span><span>📌</span><span>⤢</span><span>⚙</span></div>
+        </div>
+        <div class="statusbar"><span class="dot"></span>Онлайн · api.z.ai · тариф max</div>
+        <div class="body">
+          <div class="hero-label">Сессия (5 ч)</div>
+          <div class="hero"><b>67%</b><span>осталось</span></div>
+          <div class="sub-note">израсходовано 33% · 1 086 / 28 000</div>
+          <div class="bar"><i style="width:67%"></i></div>
+          <svg class="spark" viewBox="0 0 328 30" preserveAspectRatio="none">
+            <path d="M0 22 L28 20 L56 21 L84 15 L112 17 L140 11 L168 13 L196 8 L224 10 L252 6 L280 7 L328 4"/>
+          </svg>
+          <div class="reset">сброс через 3 ч 52 м · сегодня 16:56</div>
+
+          <div class="rows">
+            <div class="rowline">
+              <span class="lbl">Неделя</span>
+              <span class="mini"><i style="width:94%"></i></span>
+              <span class="val">94%</span>
+              <span class="when">сброс 6 д 22 ч</span>
+            </div>
+            <div class="rowline">
+              <span class="lbl">MCP</span>
+              <span class="mini"><i style="width:98%"></i></span>
+              <span class="val">98%</span>
+              <span class="when">сброс 15 д 0 ч</span>
+            </div>
+          </div>
+        </div>
+        <div class="foot"><span>v0.6.0 · обновлено 21.10.2026</span><span>16:20</span></div>
+      </div>
+      <p class="note">Сессия — герой с абсолютными значениями; неделя и MCP — строки
+      в одну колонку; sparkline — тонкая линия без заливки; служебная строка внизу.</p>
+    </div>
+
+    <div>
+      <div class="col-label">Трей — окно деталей (320 px)</div>
+      <div class="tray">
+        <div class="tray-head"><b>GLM Limits</b><span>v0.6.0</span></div>
+        <div class="tray-ver">обновлено 21.10.2026 16:05</div>
+        <div class="ring-wrap">
+          <div class="ring" style="background:conic-gradient(var(--ok) 0 33%, var(--track) 33% 100%)">
+            <span>67%</span>
+          </div>
+          <div class="ring-cap">Сессия (5 ч) · сброс через 3 ч 52 м</div>
+        </div>
+        <div class="tray-rows">
+          <div class="trow"><span>Неделя</span><span class="v">94%</span></div>
+          <div class="trow"><span>MCP</span><span class="v">98%</span></div>
+        </div>
+        <div class="tray-foot"><span>api.z.ai · 16:20</span><span>⟳</span></div>
+      </div>
+      <p class="note">Кольцо показывает расход сессии, в центре — остаток.
+      Второстепенные метрики — строки без полос. Тот же язык, что и в попапе.</p>
+    </div>
+  </div>
+</div>
+</body>
+</html>
