@@ -9,5 +9,6 @@ desktop.ini
 tray/tray_config.json
 tray/tray_state.json
 tray/tray_app.log
+tray/tray_crash.log
 __pycache__/
 *.pyc

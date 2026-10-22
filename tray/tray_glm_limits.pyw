@@ -26,13 +26,16 @@ GLM_API_KEY / ZAI_API_KEY / BIGMODEL_API_KEY / ZHIPUAI_API_KEY).
 from __future__ import annotations
 
 import base64
+import faulthandler
 import json
 import logging
 import os
+import queue
 import subprocess
 import sys
 import threading
 import time
+import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -52,7 +55,8 @@ BASE_DIR = Path(__file__).resolve().parent
 REPO_DIR = BASE_DIR.parent          # корень репозитория (для git pull)
 CONFIG_PATH = BASE_DIR / "tray_config.json"
 LOG_PATH = BASE_DIR / "tray_app.log"
-STATE_PATH = BASE_DIR / "tray_state.json"   # флаги уведомлений (в git не попадает)
+STATE_PATH = BASE_DIR / "tray_state.json"
+CRASH_PATH = BASE_DIR / "tray_crash.log"   # флаги уведомлений (в git не попадает)
 
 # Третьесторонние зависимости импортируются под защитой: .pyw работает без
 # консоли, и падение на импорте выглядело бы как «не запускается» — молча.
@@ -82,6 +86,7 @@ NOTIFY_THRESHOLDS = (80, 90, 100)
 BACKOFF_MAX_SEC = 1800
 
 logger = logging.getLogger("glm-limits.tray")
+_CRASH_FILE = None
 
 STRINGS = {
     "ru": {
@@ -162,6 +167,14 @@ def setup_logging() -> None:
     sh = logging.StreamHandler(sys.stderr)
     sh.setFormatter(fmt)
     logger.addHandler(sh)
+    # Жёсткие падения (access violation и т.п.) — тоже в файл, иначе процесс
+    # исчезает без следа.
+    try:
+        global _CRASH_FILE
+        _CRASH_FILE = open(CRASH_PATH, "a", encoding="utf-8")  # noqa: SIM115
+        faulthandler.enable(_CRASH_FILE, all_threads=True)
+    except Exception:
+        pass
 
 
 def protect_secret(plain: bytes) -> bytes | None:
@@ -571,6 +584,8 @@ class TrayApp:
         self._key_win: Any = None
         self._remote_version: str | None = None
         self._history: list[tuple[float, float]] = []   # (ts, израсходовано %)
+        self._ui_queue: queue.Queue = queue.Queue()     # действия в потоке Tk
+        self._root: Any = None
         self.current_cfg: dict[str, Any] = load_config()
         # Флаги уведомлений живут на диске: перезапуск трея не должен приводить
         # к повторному «80%» в том же окне сброса.
@@ -718,6 +733,7 @@ class TrayApp:
         self.stop_evt.set()
         self.wake.set()
         icon.stop()
+        self._post_ui(self._shutdown_ui)
 
     def toggle_autostart(self, icon: pystray.Icon, item: pystray.MenuItem) -> None:
         enable = not is_autostart_on()
@@ -878,7 +894,7 @@ class TrayApp:
 
     def open_key_dialog(self, *args: Any) -> None:
         """Ввод API-ключа мышкой: tkinter-диалог с маскировкой звёздочками."""
-        threading.Thread(target=self._key_dialog_main, name="key-dialog", daemon=True).start()
+        self._post_ui(self._key_dialog_main)
 
     def _key_dialog_main(self) -> None:
         import tkinter as tk
@@ -887,9 +903,10 @@ class TrayApp:
         s = STRINGS[lang]
         current = load_config()["apiKey"]
 
-        win = tk.Tk()
+        win = tk.Toplevel(self._root)
         win.title(APP_NAME)
         win.geometry("340x200")
+        win.grab_set()
         win.resizable(False, False)
         win.attributes("-topmost", True)
         win.configure(bg="#17181a")
@@ -942,7 +959,6 @@ class TrayApp:
                   relief="flat", padx=14, pady=3, cursor="hand2").pack(side="left", padx=6)
         win.bind("<Return>", lambda event: save())
         win.bind("<Escape>", lambda event: on_close())
-        win.mainloop()
 
     def restart_self(self, notify_text: str | None = None) -> None:
         """Запускает новую копию трей-приложения и завершает текущую."""
@@ -1000,6 +1016,32 @@ class TrayApp:
 
     # ── окно деталей (tkinter, свой поток) ───────────────────
     def open_details(self, *args: Any) -> None:
+        """Показать окно деталей. Создаётся в главном потоке Tk — иначе
+        на Windows возможен жёсткий краш без traceback."""
+        self._post_ui(self._show_details)
+
+    def _post_ui(self, fn: Any) -> None:
+        self._ui_queue.put(fn)
+
+    def _pump_ui(self) -> None:
+        """Выполняет UI-действия в главном потоке."""
+        try:
+            while True:
+                fn = self._ui_queue.get_nowait()
+                try:
+                    fn()
+                except Exception:
+                    logger.exception("Ошибка UI-действия")
+        except queue.Empty:
+            pass
+        finally:
+            if self._root is not None:
+                try:
+                    self._root.after(120, self._pump_ui)
+                except Exception:
+                    pass
+
+    def _show_details(self) -> None:
         win = self._detail_win
         if win is not None:
             try:
@@ -1009,16 +1051,7 @@ class TrayApp:
                 return
             except Exception:
                 self._detail_win = None
-        threading.Thread(target=self._details_worker, name="details", daemon=True).start()
-
-    def _details_worker(self) -> None:
-        # Окно создаётся в отдельном потоке: исключение здесь раньше
-        # гасилось молча, и пользователь видел «не открывается».
-        try:
-            self._details_main()
-        except Exception:
-            logger.exception("Не удалось открыть окно деталей")
-            self._notify_tray(self.tr("error"))
+        self._details_main()
 
     def _remember_usage(self, data: dict[str, Any]) -> None:
         """Помнит расход сессии по точкам — из них строится мини-график."""
@@ -1054,7 +1087,7 @@ class TrayApp:
         ext_version = read_repo_version()
         upd_time = repo_update_time()
 
-        win = tk.Tk()
+        win = tk.Toplevel(self._root)
         win.title(f"{APP_NAME} v{ext_version}")
         win.geometry("330x360")   # стартовый размер, дальше подгоняем под контент
         win.resizable(True, True)
@@ -1201,22 +1234,52 @@ class TrayApp:
         win.minsize(fit_w, 320)
 
         tick()
-        try:
-            win.mainloop()
-        except Exception:
-            logger.exception("Окно деталей завершилось с ошибкой")
-        finally:
-            self._detail_win = None
 
     def run(self) -> None:
-        worker = threading.Thread(target=self.poll_worker, name="poll", daemon=True)
-        worker.start()
-        self.icon = pystray.Icon(
-            APP_NAME, render_icon(None, COLOR_GRAY), APP_NAME, menu=self.build_menu()
-        )
-        logger.info("Трей-иконка запущена")
-        self._start_update_watch()
-        self.icon.run()
+        """pystray — в фоновом потоке, Tk — в главном: Tk из чужого потока
+        на Windows может уронить процесс без traceback."""
+        try:
+            import tkinter as tk
+        except Exception:
+            logger.exception("Tkinter недоступен")
+            return
+
+        threading.Thread(target=self.poll_worker, name="poll", daemon=True).start()
+        threading.Thread(target=self._icon_worker, name="icon", daemon=True).start()
+
+        self._root = tk.Tk()
+        self._root.withdraw()
+        self._root.report_callback_exception = self._on_tk_error
+        self._root.after(120, self._pump_ui)
+        try:
+            self._root.mainloop()
+        except Exception:
+            logger.exception("Главный цикл Tk завершился с ошибкой")
+        logger.info("Приложение остановлено")
+
+    def _icon_worker(self) -> None:
+        try:
+            self.icon = pystray.Icon(
+                APP_NAME, render_icon(None, COLOR_GRAY), APP_NAME, menu=self.build_menu()
+            )
+            logger.info("Трей-иконка запущена")
+            self._start_update_watch()
+            self.icon.run()
+        except Exception:
+            logger.exception("Трей-иконка завершилась с ошибкой")
+
+    def _on_tk_error(self, exc: Any, val: Any, tb: Any) -> None:
+        logger.error("Ошибка в Tk-колбэке: %s", val)
+        traceback.print_exception(exc, val, tb)
+
+    def _shutdown_ui(self) -> None:
+        try:
+            if self._root is not None:
+                self._root.quit()
+                self._root.destroy()
+                self._root = None
+        except Exception:
+            logger.exception("Не удалось закрыть Tk")
 
 
 def selftest() -> int:
