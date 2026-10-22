@@ -557,6 +557,7 @@ class TrayApp:
         self._detail_win: Any = None
         self._key_win: Any = None
         self._remote_version: str | None = None
+        self._history: list[tuple[float, float]] = []   # (ts, израсходовано %)
         self.current_cfg: dict[str, Any] = load_config()
         # Флаги уведомлений живут на диске: перезапуск трея не должен приводить
         # к повторному «80%» в том же окне сброса.
@@ -668,6 +669,7 @@ class TrayApp:
                         data = fetch_quota(cfg["apiKey"], cfg["platform"])
                         self.state.set(data)
                         self.check_notifications(cfg, data)
+                        self._remember_usage(data)
                         streak = 0
                         interval = cfg["intervalSec"]
                         logger.info(
@@ -995,6 +997,30 @@ class TrayApp:
                 self._detail_win = None
         threading.Thread(target=self._details_main, name="details", daemon=True).start()
 
+    def _remember_usage(self, data: dict[str, Any]) -> None:
+        """Помнит расход сессии по точкам — из них строится мини-график."""
+        s = data.get("s")
+        if not s:
+            return
+        now = time.time()
+        self._history.append((now, float(s["used"])))
+        cutoff = now - 24 * 3600
+        while self._history and self._history[0][0] < cutoff:
+            self._history.pop(0)
+
+    def _hourly_buckets(self) -> dict[int, float]:
+        """Сколько окна сожгли в каждый час (часы активности)."""
+        buckets: dict[int, float] = {}
+        hist = self._history
+        for i in range(1, len(hist)):
+            v0 = hist[i - 1][1]
+            v1 = hist[i][1]
+            if v1 - v0 <= 0:
+                continue
+            hour = datetime.fromtimestamp(hist[i][0]).hour
+            buckets[hour] = buckets.get(hour, 0.0) + (v1 - v0)
+        return buckets
+
     def _details_main(self) -> None:
         import tkinter as tk
 
@@ -1007,7 +1033,7 @@ class TrayApp:
 
         win = tk.Tk()
         win.title(f"{APP_NAME} v{ext_version}")
-        win.geometry("330x330")
+        win.geometry("330x360")
         win.resizable(False, False)
         win.attributes("-topmost", True)
         win.configure(bg=c["bg"])
@@ -1019,23 +1045,33 @@ class TrayApp:
 
         win.protocol("WM_DELETE_WINDOW", on_close)
 
+        # Шапка
         head = tk.Frame(win, bg=c["bg"])
-        head.pack(fill="x", padx=16, pady=(12, 0))
-        tk.Label(head, text=APP_NAME, font=("Segoe UI", 13, "bold"), fg=c["text"],
-                 bg=c["bg"]).pack(side="left")
-        tk.Label(head, text=f"v{ext_version}", font=("Segoe UI", 9), fg=c["muted"],
-                 bg=c["bg"]).pack(side="right")
+        head.pack(fill="x", padx=16, pady=(14, 0))
+        tk.Label(head, text=APP_NAME, font=("Segoe UI", 12, "bold"),
+                 fg=c["text"], bg=c["bg"]).pack(side="left")
+        tk.Label(head, text=f"v{ext_version}", font=("Segoe UI", 9),
+                 fg=c["muted"], bg=c["bg"]).pack(side="right")
         if upd_time:
             tk.Label(win, text=f"{self.tr('updated_at')}: {upd_time}", font=("Segoe UI", 9),
-                     fg=c["muted"], bg=c["bg"]).pack(anchor="w", padx=16)
+                     fg=c["muted"], bg=c["bg"]).pack(anchor="w", padx=16, pady=(1, 0))
 
-        # Кольцо-прогресс: расход сессии, в центре — остаток.
-        ring = tk.Canvas(win, width=112, height=112, bg=c["bg"], highlightthickness=0)
+        # Кольцо: расход сессии, в центре — остаток
+        ring = tk.Canvas(win, width=120, height=120, bg=c["bg"], highlightthickness=0)
         ring.pack(pady=(10, 0))
-        ring.create_oval(6, 6, 106, 106, outline=c["line"], width=9)
+        ring.create_oval(8, 8, 112, 112, outline=c["line"], width=10)
+        ring.create_text(60, 54, text="—", font=("Segoe UI", 22, "bold"),
+                         fill=c["text"], tags="value")
+        ring.create_text(60, 80, text="", font=("Segoe UI", 9),
+                         fill=c["muted"], tags="caption")
         cap = tk.Label(win, text="", font=("Segoe UI", 10), fg=c["muted"], bg=c["bg"])
-        cap.pack(pady=(2, 0))
+        cap.pack(pady=(4, 0))
 
+        # Мини-график активности: скользящее окно часов вокруг «сейчас»
+        chart = tk.Canvas(win, width=298, height=34, bg=c["bg"], highlightthickness=0)
+        chart.pack(pady=(10, 0))
+
+        # Строки: неделя и MCP
         rows = {}
 
         def make_row(key: str, title: str) -> None:
@@ -1048,12 +1084,13 @@ class TrayApp:
             val.pack(side="right")
             rows[key] = val
 
-        tk.Frame(win, height=1, bg=c["line"]).pack(fill="x", padx=16, pady=(10, 2))
+        tk.Frame(win, height=1, bg=c["line"]).pack(fill="x", padx=16, pady=(12, 3))
         make_row("w", self.tr("weekly"))
         make_row("mcp", self.tr("mcp"))
 
+        # Подвал: хост, время данных и кнопка обновления
         foot = tk.Frame(win, bg=c["bg"])
-        foot.pack(fill="x", padx=16, pady=(10, 12))
+        foot.pack(fill="x", padx=16, pady=(12, 12))
         foot_lbl = tk.Label(foot, text="", font=("Segoe UI", 9), fg=c["muted"], bg=c["bg"])
         foot_lbl.pack(side="left")
         tk.Button(foot, text="⟳", command=self.wake.set, bg=c["card"], fg=c["text"],
@@ -1069,6 +1106,30 @@ class TrayApp:
                 return c["hot"]
             return c["risk"]
 
+        def draw_chart() -> None:
+            """Скользящее окно: 3 часа назад и 3 вперёд."""
+            chart.delete("all")
+            buckets = self._hourly_buckets()
+            now = datetime.now()
+            hours = [(now.hour - 3 + i) % 24 for i in range(6)]
+            values = [buckets.get(h, 0.0) for h in hours]
+            peak = max(values) if values else 0.0
+            slot = 298 / 6
+            for i, (hour, value) in enumerate(zip(hours, values)):
+                x = i * slot + 6
+                w = slot - 12
+                h = max(2, (value / peak) * 20) if peak > 0 and value > 0 else 2
+                if i == 3:      # текущий час — акцентом
+                    color = c["accent"]
+                elif value > 0:
+                    color = c["ok"]
+                else:
+                    color = c["line"]
+                chart.create_rectangle(x, 22 - h, x + w, 22, fill=color, outline="")
+                chart.create_text(x + w / 2, 30, text=f"{hour:02d}",
+                                  fill=c["accent"] if i == 3 else c["muted"],
+                                  font=("Segoe UI", 8))
+
         def tick() -> None:
             if self._detail_win is not win:
                 return
@@ -1083,35 +1144,31 @@ class TrayApp:
             if s:
                 used = float(s["used"])
                 ring.delete("arc")
-                ring.create_arc(6, 6, 106, 106, start=90, extent=-359.9 * (used / 100.0),
-                                style="arc", width=9, outline=color_for_used(used))
-                ring.itemconfigure("text", text=f"{100 - int(used)}%")
-                ring.itemconfigure("text2", text=self.tr("left"))
+                ring.create_arc(8, 8, 112, 112, start=90, extent=-359.9 * (used / 100.0),
+                                style="arc", width=10, outline=color_for_used(used))
+                ring.itemconfigure("value", text=f"{100 - int(used)}%")
+                ring.itemconfigure("caption", text=self.tr("left"))
                 cap.config(text=f"{self.tr('session')} · {self.tr('reset')} "
                                 f"{fmt_countdown(s['resets_at'], lang)}")
             else:
-                ring.itemconfigure("text", text="—")
-                ring.itemconfigure("text2", text="")
-                cap.config(text=self.tr("no_data") if not ok else "")
-            for key, label in (("w", "w"), ("mcp", "mcp")):
-                win_data = d.get(label) if ok else None
+                ring.itemconfigure("value", text="—")
+                ring.itemconfigure("caption", text="")
+                cap.config(text=self.tr("no_data"))
+            for key, source in (("w", "w"), ("mcp", "mcp")):
+                win_data = d.get(source) if ok else None
                 if win_data:
                     used_w = float(win_data["used"])
                     rows[key].config(text=f"{100 - int(used_w)}%",
                                      fg=color_for_used(used_w))
                 else:
                     rows[key].config(text="—", fg=c["muted"])
+            draw_chart()
             ts = d.get("ts")
             host = HOSTS.get(d.get("platform"), "")
             foot_lbl.config(text=(f"{time.strftime('%H:%M:%S', time.localtime(ts))} · {host}"
                                   if ts else ""))
             win.after(1000, tick)
 
-        # Текст внутри кольца: два элемента (процент и подпись)
-        ring.create_text(56, 50, text="—", font=("Segoe UI", 21, "bold"), fill=c["text"],
-                         tags="text")
-        ring.create_text(56, 74, text="", font=("Segoe UI", 9), fill=c["muted"],
-                         tags="text2")
         tick()
         try:
             win.mainloop()

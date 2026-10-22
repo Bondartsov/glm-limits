@@ -105,6 +105,7 @@ let toastTimer = null;
 let historyData = [];
 let lastUpdateInfo = null;      // кэш lastUpdate — читаем из storage не каждый кадр
 let updateAvailableInfo = null; // метка «доступна новая версия» (постоянная)
+let lastChartHour = null;       // час, для которого нарисована скользящая шкала
 
 // ── Helpers ──────────────────────────────────────────────
 function t(key) {
@@ -248,6 +249,96 @@ function renderChart(el, bars, labels, barH, highlightIndex) {
     node.setAttribute("text-anchor", "middle");
     node.setAttribute("style", "fill:var(--muted);font-size:" + (labels.length > 8 ? "7px" : "9px"));
     node.textContent = label;
+    el.appendChild(node);
+  });
+}
+
+// Окно часов вокруг «сейчас» + отметки границ сброса окна.
+function sessionWindow() {
+  const now = Date.now();
+  const win = GLMQuota.activityWindow(
+    historyData.map((p) => ({ ts: p.ts, v: p.s })), now, 6, 3);
+  const s = latestData && latestData.s;
+  const marks = [];
+  if (s && s.resetsAt) {
+    const nextMs = new Date(s.resetsAt).getTime();
+    // Границы окна: прошлый сброс (≈5 ч назад) и следующий.
+    for (const ms of [nextMs, nextMs - 5 * 3600e3]) {
+      const hour = new Date(ms).getHours();
+      const idx = win.bars.findIndex((b) => b.hour === hour);
+      if (idx >= 0 && !marks.includes(idx)) marks.push(idx);
+    }
+  }
+  win.resets = marks;
+  return win;
+}
+
+// График активности в скользящем окне часов: столбцы, подписи часов,
+// пунктирные отметки границ сброса.
+function renderTimeChart(el, win) {
+  if (!el) return;
+  const bars = (win && win.bars) || [];
+  if (!bars.some((b) => b.has)) { el.style.display = "none"; return; }
+  el.style.display = "block";
+
+  const W = 328, H = 30;
+  const max = Math.max(1, ...bars.map((b) => b.value));
+  const slot = W / bars.length;
+  const NS = "http://www.w3.org/2000/svg";
+
+  while (el.firstChild) el.removeChild(el.firstChild);
+
+  bars.forEach((b, i) => {
+    const x = i * slot + 1;
+    const w = Math.max(2, slot - 2);
+    const rect = document.createElementNS(NS, "rect");
+    if (!b.has) {
+      rect.setAttribute("x", String(x));
+      rect.setAttribute("y", String(H - 2));
+      rect.setAttribute("width", String(w));
+      rect.setAttribute("height", "2");
+      rect.setAttribute("style", b.isFuture
+        ? "fill:var(--track);opacity:.35" : "fill:var(--track)");
+    } else {
+      const h = Math.max(2, (b.value / max) * (H - 2));
+      rect.setAttribute("x", String(x));
+      rect.setAttribute("y", String(H - h));
+      rect.setAttribute("width", String(w));
+      rect.setAttribute("height", String(h));
+      rect.setAttribute("rx", "1.5");
+      rect.setAttribute("style", b.isNow
+        ? "fill:var(--accent)"
+        : "fill:var(--accent);opacity:" + (0.35 + 0.5 * (b.value / max)).toFixed(2));
+    }
+    el.appendChild(rect);
+  });
+
+  // Границы сброса окна.
+  (win.resets || []).forEach((idx) => {
+    const x = idx * slot + slot / 2;
+    const line = document.createElementNS(NS, "line");
+    line.setAttribute("x1", String(x));
+    line.setAttribute("x2", String(x));
+    line.setAttribute("y1", "0");
+    line.setAttribute("y2", String(H));
+    line.setAttribute("style", "stroke:var(--muted);stroke-width:1;stroke-dasharray:2 2");
+    el.appendChild(line);
+    const dot = document.createElementNS(NS, "circle");
+    dot.setAttribute("cx", String(x));
+    dot.setAttribute("cy", "2");
+    dot.setAttribute("r", "2");
+    dot.setAttribute("style", "fill:var(--muted)");
+    el.appendChild(dot);
+  });
+
+  // Подписи часов.
+  bars.forEach((b, i) => {
+    const node = document.createElementNS(NS, "text");
+    node.setAttribute("x", String(i * slot + slot / 2));
+    node.setAttribute("y", String(H + 8));
+    node.setAttribute("text-anchor", "middle");
+    node.setAttribute("style", "fill:" + (b.isNow ? "var(--accent)" : "var(--muted)") + ";font-size:9px");
+    node.textContent = String(b.hour).padStart(2, "0");
     el.appendChild(node);
   });
 }
@@ -423,12 +514,9 @@ function render(data) {
     $("planBadge").style.display = "none";
   }
 
-  // Активность сессии по часам суток (каждый час — свой столбец).
-  const hourLabels = [];
-  for (let h = 0; h < 24; h++) hourLabels.push(String(h).padStart(2, "0"));
-  renderChart($("sessionChart"), GLMQuota.hourlyActivity(
-    historyData.map((p) => ({ ts: p.ts, v: p.s })), Date.now()),
-    hourLabels, 32, new Date().getHours());
+  // Активность сессии — скользящее окно часов вокруг «сейчас» (3 ч назад
+  // и 3 ч вперёд), с отметками границ сброса окна.
+  renderTimeChart($("sessionChart"), sessionWindow());
 
   // Расход недельного окна по дням недели (Пн..Вс).
   renderChart($("weeklyChart"), GLMQuota.dailyActivity(
@@ -679,6 +767,13 @@ function tickUpdate() {
   if (s && s.resetsAt) {
     const ms = new Date(s.resetsAt).getTime();
     $("footReset").textContent = fmtCountdown(ms) + " · " + fmtAt(ms);
+  }
+  // Скользящая шкала переезжает вместе с текущим часом — перерисовываем
+  // только когда час реально сменился.
+  const hour = new Date().getHours();
+  if (hour !== lastChartHour) {
+    lastChartHour = hour;
+    renderTimeChart($("sessionChart"), sessionWindow());
   }
 }
 

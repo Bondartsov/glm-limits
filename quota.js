@@ -182,11 +182,35 @@ const GLMQuota = (() => {
     return buckets.map((value, index) => ({ index, value, has: seen[index] }));
   }
 
+  // Скользящее окно активности: spanHours столбцов вокруг текущего часа
+  // (beforeHours слева, остальное справа). Ночные часы не занимают место —
+  // шкала показывает только то, что рядом с «сейчас».
+  function activityWindow(points, nowMs, spanHours, beforeHours) {
+    const span = spanHours || 6;
+    const before = beforeHours == null ? Math.floor(span / 2) : beforeHours;
+    const now = nowMs || Date.now();
+    const nowHour = new Date(now).getHours();
+    const buckets = hourlyActivity(points, now, 24);
+    const bars = [];
+    for (let i = 0; i < span; i++) {
+      const hour = (nowHour - before + i + 48) % 24;
+      const b = buckets[hour] || { hour, value: 0, has: false };
+      bars.push({
+        hour,
+        value: b.value,
+        has: b.has,
+        isNow: i === before,
+        isFuture: i > before,
+      });
+    }
+    return { bars, span, before, nowHour };
+  }
+
   const api = {
     TOKEN_TYPES, MONTHLY_TYPE, NOTIFY_THRESHOLDS, BADGE_COLORS,
     toNumber, normalizeWindow, parseLimits, detectPlatform,
     badgeColor, badgeText, notifyDecision, formatAmount,
-    hourlyActivity, dailyActivity,
+    hourlyActivity, dailyActivity, activityWindow,
   };
 
   if (typeof globalThis !== "undefined") globalThis.GLMQuota = api;

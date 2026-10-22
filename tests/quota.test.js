@@ -127,6 +127,22 @@ test("notifyDecision: новое окно сброса перезаряжает 
   assert.equal(d.threshold, 80, "в новом окне порог снова срабатывает");
 });
 
+test("activityWindow: скользящее окно вокруг текущего часа", () => {
+  const now = new Date(2026, 9, 22, 15, 30, 0).getTime();   // 15:30
+  const pts = [
+    { ts: now - 3600e3, v: 10 },   // 14:30
+    { ts: now - 1800e3, v: 25 },   // 15:00 → +15
+  ];
+  const win = GLMQuota.activityWindow(pts, now, 6, 3);
+  assert.equal(win.bars.length, 6);
+  assert.equal(win.bars[3].isNow, true, "четвёртый столбец — текущий час");
+  assert.equal(win.bars[3].hour, 15);
+  assert.equal(win.bars[0].hour, 12, "три часа назад");
+  assert.equal(win.bars[5].hour, 17, "через два часа");
+  assert.equal(win.bars[3].value, 15);
+  assert.equal(win.bars[4].isFuture, true, "будущие часы помечены");
+});
+
 test("dailyActivity: расход раскладывается по дням недели (Пн..Вс)", () => {
   // Понедельник 2026-10-19 12:00 по местному
   const mon = new Date(2026, 9, 19, 12, 0, 0).getTime();
