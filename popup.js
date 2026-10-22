@@ -44,6 +44,8 @@ const I18N = {
     sessionLeft: "Left · session (5h)", weeklyLeft: "Left · weekly", mcpLeft: "Left · MCP",
     chartHours: "activity by hour",
     chartDays: "spend by day of week",
+    legendNow: "now",
+    legendReset: "reset",
     footWhen: "Resets", footSource: "Source",
     today: "Today HH:MM", tomorrow: "Tomorrow HH:MM",
     resetNow: "Resets now",
@@ -90,6 +92,8 @@ const I18N = {
     sessionLeft: "Осталось · сессия (5ч)", weeklyLeft: "Осталось · неделя", mcpLeft: "Осталось · MCP",
     chartHours: "активность по часам",
     chartDays: "расход по дням недели",
+    legendNow: "сейчас",
+    legendReset: "сброс",
     footWhen: "Сброс", footSource: "Источник",
     today: "Сегодня HH:MM", tomorrow: "Завтра HH:MM",
     resetNow: "Сброс сейчас",
@@ -201,58 +205,6 @@ async function loadUpdateInfo() {
     updateAvailableInfo = null;
   }
 }
-
-// ── Графики ───────────────────────────────────────────────
-// bars: [{ value, has }], labels: подписи оси (по одной на столбец).
-function renderChart(el, bars, labels, barH, highlightIndex) {
-  if (!el) return;
-  const list = Array.isArray(bars) ? bars : [];
-  if (!list.some((b) => b && b.has)) { el.style.display = "none"; return; }
-  el.style.display = "block";
-
-  const W = 328, H = barH;
-  const max = Math.max(1, ...list.map((b) => b.value));
-  const slot = W / list.length;
-  const NS = "http://www.w3.org/2000/svg";
-
-  while (el.firstChild) el.removeChild(el.firstChild);
-
-  list.forEach((b, i) => {
-    const x = i * slot + 1;
-    const w = Math.max(2, slot - 2);
-    const rect = document.createElementNS(NS, "rect");
-    if (!b.has) {
-      rect.setAttribute("x", String(x));
-      rect.setAttribute("y", String(H - 2));
-      rect.setAttribute("width", String(w));
-      rect.setAttribute("height", "2");
-      rect.setAttribute("style", "fill:var(--track)");
-    } else {
-      const h = Math.max(2, (b.value / max) * (H - 2));
-      rect.setAttribute("x", String(x));
-      rect.setAttribute("y", String(H - h));
-      rect.setAttribute("width", String(w));
-      rect.setAttribute("height", String(h));
-      rect.setAttribute("rx", "1.5");
-      const strong = i === highlightIndex;
-      rect.setAttribute("style", strong
-        ? "fill:var(--accent)"
-        : "fill:var(--accent);opacity:" + (0.35 + 0.5 * (b.value / max)).toFixed(2));
-    }
-    el.appendChild(rect);
-  });
-
-  (labels || []).forEach((label, i) => {
-    const node = document.createElementNS(NS, "text");
-    node.setAttribute("x", String(i * slot + slot / 2));
-    node.setAttribute("y", String(H + 8));
-    node.setAttribute("text-anchor", "middle");
-    node.setAttribute("style", "fill:var(--muted);font-size:" + (labels.length > 8 ? "7px" : "9px"));
-    node.textContent = label;
-    el.appendChild(node);
-  });
-}
-
 // Окно часов вокруг «сейчас» + отметки границ сброса окна.
 function sessionWindow() {
   const now = Date.now();
@@ -273,22 +225,41 @@ function sessionWindow() {
   return win;
 }
 
-// График активности в скользящем окне часов: столбцы, подписи часов,
-// пунктирные отметки границ сброса.
-function renderTimeChart(el, win) {
+// Недельное окно: сегодня и день сброса недельного окна.
+function weeklyWindow() {
+  const buckets = GLMQuota.dailyActivity(
+    historyData.map((p) => ({ ts: p.ts, v: p.w })), Date.now());
+  const todayIdx = (new Date().getDay() + 6) % 7;
+  const resets = [];
+  const w = latestData && latestData.w;
+  if (w && w.resetsAt) {
+    const idx = (new Date(w.resetsAt).getDay() + 6) % 7;
+    if (buckets[idx]) resets.push(idx);
+  }
+  return {
+    bars: buckets.map((b) => ({ ...b, isNow: b.index === todayIdx })),
+    labels: t("weekdays"),
+    nowIndex: todayIdx,
+    resets,
+  };
+}
+
+// График активности: столбцы, подписи и отметки «сейчас» (сплошная) и
+// «сброс» (пунктирная).
+function renderTimeChart(el, bars, labels, opts) {
   if (!el) return;
-  const bars = (win && win.bars) || [];
-  if (!bars.some((b) => b.has)) { el.style.display = "none"; return; }
+  const list = Array.isArray(bars) ? bars : [];
+  if (!list.some((b) => b && b.has)) { el.style.display = "none"; return; }
   el.style.display = "block";
 
-  const W = 328, H = 30;
-  const max = Math.max(1, ...bars.map((b) => b.value));
-  const slot = W / bars.length;
+  const W = 328, H = (opts && opts.barH) || 30;
+  const max = Math.max(1, ...list.map((b) => b.value));
+  const slot = W / list.length;
   const NS = "http://www.w3.org/2000/svg";
 
   while (el.firstChild) el.removeChild(el.firstChild);
 
-  bars.forEach((b, i) => {
+  list.forEach((b, i) => {
     const x = i * slot + 1;
     const w = Math.max(2, slot - 2);
     const rect = document.createElementNS(NS, "rect");
@@ -313,34 +284,69 @@ function renderTimeChart(el, win) {
     el.appendChild(rect);
   });
 
-  // Границы сброса окна.
-  (win.resets || []).forEach((idx) => {
+  // Отметка «сейчас» — сплошная линия акцентом.
+  const nowIndex = opts && opts.nowIndex;
+  if (nowIndex != null && nowIndex >= 0) {
+    const x = nowIndex * slot + slot / 2;
+    const line = document.createElementNS(NS, "line");
+    line.setAttribute("x1", String(x));
+    line.setAttribute("x2", String(x));
+    line.setAttribute("y1", "0");
+    line.setAttribute("y2", String(H));
+    line.setAttribute("style", "stroke:var(--accent);stroke-width:1.5");
+    el.appendChild(line);
+  }
+
+  // Отметки сброса окна — пунктирная линия другим цветом.
+  ((opts && opts.resets) || []).forEach((idx) => {
     const x = idx * slot + slot / 2;
     const line = document.createElementNS(NS, "line");
     line.setAttribute("x1", String(x));
     line.setAttribute("x2", String(x));
     line.setAttribute("y1", "0");
     line.setAttribute("y2", String(H));
-    line.setAttribute("style", "stroke:var(--muted);stroke-width:1;stroke-dasharray:2 2");
+    line.setAttribute("style", "stroke:var(--hot);stroke-width:1.5;stroke-dasharray:3 2");
     el.appendChild(line);
-    const dot = document.createElementNS(NS, "circle");
-    dot.setAttribute("cx", String(x));
-    dot.setAttribute("cy", "2");
-    dot.setAttribute("r", "2");
-    dot.setAttribute("style", "fill:var(--muted)");
-    el.appendChild(dot);
   });
 
-  // Подписи часов.
-  bars.forEach((b, i) => {
+  // Подписи.
+  (labels || []).forEach((label, i) => {
     const node = document.createElementNS(NS, "text");
     node.setAttribute("x", String(i * slot + slot / 2));
     node.setAttribute("y", String(H + 8));
     node.setAttribute("text-anchor", "middle");
-    node.setAttribute("style", "fill:" + (b.isNow ? "var(--accent)" : "var(--muted)") + ";font-size:9px");
-    node.textContent = String(b.hour).padStart(2, "0");
+    node.setAttribute("style", "fill:" + (i === nowIndex ? "var(--accent)" : "var(--muted)") +
+      ";font-size:" + (labels.length > 8 ? "7px" : "9px"));
+    node.textContent = label;
     el.appendChild(node);
   });
+}
+
+// Маленькая расшифровка под графиком: что означают линии.
+function renderLegend(el, items) {
+  if (!el) return;
+  while (el.firstChild) el.removeChild(el.firstChild);
+  for (const item of items) {
+    const wrap = document.createElement("span");
+    wrap.className = "legend-item";
+    const sw = document.createElement("i");
+    sw.className = "legend-swatch" + (item.dashed ? " dashed" : "");
+    sw.style.setProperty("--sw", item.color);
+    const label = document.createElement("b");
+    label.textContent = item.label;
+    wrap.appendChild(sw);
+    wrap.appendChild(label);
+    el.appendChild(wrap);
+  }
+}
+
+function updateChartLegends() {
+  const items = [
+    { color: "var(--accent)", label: t("legendNow") },
+    { color: "var(--hot)", dashed: true, label: t("legendReset") },
+  ];
+  renderLegend($("sessionLegend"), items);
+  renderLegend($("weeklyLegend"), items);
 }
 
 // ── Рендеринг ─────────────────────────────────────────────
@@ -515,13 +521,19 @@ function render(data) {
   }
 
   // Активность сессии — скользящее окно часов вокруг «сейчас» (3 ч назад
-  // и 3 ч вперёд), с отметками границ сброса окна.
-  renderTimeChart($("sessionChart"), sessionWindow());
+  // и 3 ч вперёд), с отметками «сейчас» и границ сброса окна.
+  const sWin = sessionWindow();
+  renderTimeChart($("sessionChart"), sWin.bars,
+    sWin.bars.map((b) => String(b.hour).padStart(2, "0")),
+    { barH: 30, nowIndex: sWin.before, resets: sWin.resets });
 
-  // Расход недельного окна по дням недели (Пн..Вс).
-  renderChart($("weeklyChart"), GLMQuota.dailyActivity(
-    historyData.map((p) => ({ ts: p.ts, v: p.w })), Date.now()),
-    t("weekdays"), 18, (new Date().getDay() + 6) % 7);
+  // Расход недельного окна по дням недели (Пн..Вс): отметки «сегодня»
+  // и дня сброса недели.
+  const wWin = weeklyWindow();
+  renderTimeChart($("weeklyChart"), wWin.bars, wWin.labels,
+    { barH: 18, nowIndex: wWin.nowIndex, resets: wWin.resets });
+
+  updateChartLegends();
 
   renderFooter(data);
 }
@@ -773,7 +785,10 @@ function tickUpdate() {
   const hour = new Date().getHours();
   if (hour !== lastChartHour) {
     lastChartHour = hour;
-    renderTimeChart($("sessionChart"), sessionWindow());
+    const sWin = sessionWindow();
+    renderTimeChart($("sessionChart"), sWin.bars,
+      sWin.bars.map((b) => String(b.hour).padStart(2, "0")),
+      { barH: 30, nowIndex: sWin.before, resets: sWin.resets });
   }
 }
 

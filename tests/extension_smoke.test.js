@@ -73,9 +73,13 @@ function makeChromeMock(options = {}) {
 
 // ── Мок DOM ─────────────────────────────────────────────────
 function makeEl(id) {
+  const style = {
+    setProperty(name, value) { this[name] = value; },
+    getPropertyValue(name) { return this[name] || ""; },
+  };
   return {
     id,
-    style: {},
+    style,
     dataset: {},
     classList: { _s: new Set(), add() {}, remove() {}, toggle() {}, contains() { return false; } },
     children: [],
@@ -85,8 +89,12 @@ function makeEl(id) {
     value: "",
     checked: false,
     title: "",
-    appendChild(c) { this.children.push(c); this.firstChild = c; return c; },
-    removeChild(c) { this.children = this.children.filter((x) => x !== c); return c; },
+    appendChild(c) { this.children.push(c); this.firstChild = this.children[0]; return c; },
+    removeChild(c) {
+      this.children = this.children.filter((x) => x !== c);
+      this.firstChild = this.children[0] || null;   // как в настоящем DOM
+      return c;
+    },
     setAttribute() {},
     getAttribute() { return null; },
     addEventListener() {},
@@ -117,7 +125,9 @@ function makeDomMock(ids) {
 const POPUP_IDS = [
   "app", "status", "statusExtra", "emptyState", "emptySettings", "loading",
   "metricSession", "sessionPct", "sessionAnno", "sessionBar", "sessionChart", "sessionReset",
+  "sessionLegend",
   "metricWeekly", "weeklyPct", "weeklyAnno", "weeklyBar", "weeklyReset", "weeklyChart",
+  "weeklyLegend",
   "metricMcp", "mcpPct", "mcpAnno", "mcpBar", "mcpReset",
   "planBadge", "compactView", "chipSession", "chipSessionPct", "chipWeekly", "chipWeeklyPct",
   "footer", "footReset", "footSource",

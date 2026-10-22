@@ -85,7 +85,7 @@ logger = logging.getLogger("glm-limits.tray")
 
 STRINGS = {
     "ru": {
-        "session": "Сессия (5ч)", "weekly": "Неделя",
+        "session": "Сессия (5ч)", "weekly": "Неделя", "mcp": "MCP",
         "left": "осталось", "used": "израсходовано",
         "no_data": "Нет данных", "error": "Ошибка",
         "reset": "сброс через", "refresh": "Обновить данные",
@@ -115,7 +115,7 @@ STRINGS = {
         "updated_at": "Обновлено",
     },
     "en": {
-        "session": "Session (5h)", "weekly": "Weekly",
+        "session": "Session (5h)", "weekly": "Weekly", "mcp": "MCP",
         "left": "left", "used": "used",
         "no_data": "No data", "error": "Error",
         "reset": "resets in", "refresh": "Refresh data",
@@ -564,7 +564,8 @@ class TrayApp:
         self.state.notif.update(load_notif_state())
 
     def tr(self, key: str) -> str:
-        return STRINGS[self.current_cfg["lang"]][key]
+        # Отсутствующий ключ не должен ронять UI — показываем сам ключ.
+        return STRINGS.get(self.current_cfg["lang"], {}).get(key)             or STRINGS.get("en", {}).get(key) or key
 
     # ── строки меню ──────────────────────────────────────────
     def _window_line(self, kind: str) -> str:
@@ -995,7 +996,16 @@ class TrayApp:
                 return
             except Exception:
                 self._detail_win = None
-        threading.Thread(target=self._details_main, name="details", daemon=True).start()
+        threading.Thread(target=self._details_worker, name="details", daemon=True).start()
+
+    def _details_worker(self) -> None:
+        # Окно создаётся в отдельном потоке: исключение здесь раньше
+        # гасилось молча, и пользователь видел «не открывается».
+        try:
+            self._details_main()
+        except Exception:
+            logger.exception("Не удалось открыть окно деталей")
+            self._notify_tray(self.tr("error"))
 
     def _remember_usage(self, data: dict[str, Any]) -> None:
         """Помнит расход сессии по точкам — из них строится мини-график."""

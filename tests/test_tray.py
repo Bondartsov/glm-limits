@@ -178,6 +178,49 @@ class TestNotifications(unittest.TestCase):
         self.assertEqual(len(app.icon.messages), 0)
 
 
+class TestStrings(unittest.TestCase):
+    """Именно отсутствующий ключ перевода ('mcp') однажды уронил окно трея."""
+
+    REQUIRED = (
+        "session", "weekly", "mcp", "left", "used", "no_data", "error",
+        "reset", "updated_at", "details", "refresh", "exit",
+        "upd_ext", "upd_available", "upd_no_available", "upd_done_ver",
+        "upd_incomplete", "upd_none", "upd_fail", "tray_restarting",
+        "restart", "restarting", "restart_fail",
+        "key_menu", "key_prompt", "key_current_set", "key_current_none",
+        "key_saved", "key_empty", "save_btn", "cancel_btn",
+        "auto_on", "auto_off", "notify", "no_key",
+    )
+
+    def test_all_keys_present_in_both_locales(self):
+        for lang in ("ru", "en"):
+            for key in self.REQUIRED:
+                self.assertIn(key, tray.STRINGS[lang], f"нет ключа '{key}' в локали {lang}")
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        tmp = Path(self._tmp.name)
+        self._orig_config = tray.CONFIG_PATH
+        self._orig_state = tray.STATE_PATH
+        tray.CONFIG_PATH = tmp / "tray_config.json"
+        tray.STATE_PATH = tmp / "tray_state.json"
+
+    def tearDown(self):
+        tray.CONFIG_PATH = self._orig_config
+        tray.STATE_PATH = self._orig_state
+        self._tmp.cleanup()
+
+    def test_tr_does_not_raise_on_missing_key(self):
+        app = tray.TrayApp()
+        self.assertEqual(app.tr("no_such_key"), "no_such_key",
+                         "отсутствующий ключ должен возвращаться строкой, а не падать")
+
+    def test_window_keys_resolve(self):
+        app = tray.TrayApp()
+        for key in ("mcp", "session", "weekly", "left", "reset", "no_data"):
+            self.assertIsInstance(app.tr(key), str)
+
+
 @unittest.skipUnless(sys.platform == "win32", "DPAPI доступен только на Windows")
 class TestKeyProtection(unittest.TestCase):
     def setUp(self):

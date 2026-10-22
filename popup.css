@@ -156,6 +156,19 @@ body {
 .chart-week { height: 28px; }
 .chart text { font-family: inherit; }
 
+/* Расшифровка под графиком: сейчас / сброс */
+.chart-legend {
+  display: flex; gap: 14px; margin-top: 6px;
+  font-size: 10.5px; color: var(--muted);
+}
+.legend-item { display: inline-flex; align-items: center; gap: 5px; }
+.legend-item b { font-weight: 400; }
+.legend-swatch {
+  display: inline-block; width: 12px; height: 0;
+  border-top: 2px solid var(--sw, var(--accent));
+}
+.legend-swatch.dashed { border-top-style: dashed; }
+
 .card-foot {
   display: flex; align-items: baseline; justify-content: space-between;
   gap: 10px; margin-top: 8px;
