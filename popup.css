@@ -168,6 +168,14 @@ body {
   margin-top: 8px;
 }
 
+/* Часовой график активности (24 столбца + ось часов) */
+.chart {
+  display: none;
+  width: 100%;
+  height: 41px;
+  margin-top: 8px;
+}
+
 .reset {
   font-size: 11.5px;
   color: var(--text-muted);

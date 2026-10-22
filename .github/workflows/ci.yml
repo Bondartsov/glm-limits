@@ -32,5 +32,8 @@ jobs:
       - name: Проверка синтаксиса расширения
         run: node --check background.js && node --check popup.js && node --check quota.js && node --check keyring.js
 
+      - name: Проверка manifest.json
+        run: node -e "JSON.parse(require('fs').readFileSync('manifest.json','utf8')); console.log('manifest OK')"
+
       - name: Проверка синтаксиса трея
         run: python -m py_compile tray/tray_glm_limits.pyw

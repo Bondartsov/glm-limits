@@ -4,8 +4,22 @@
 // Settings: platform (auto-detected from the key), poll interval, view mode, notifications.
 
 // Чистая логика разбора квот вынесена в quota.js — её же тестируют node-тесты.
-importScripts("quota.js");
-importScripts("keyring.js");
+// importScripts может не найти файл (например, в момент git pull ещё не
+// дописали) — тогда падать нельзя: расширение должно показать понятную
+// ошибку, а не исчезнуть из браузера.
+let modulesReady = true;
+try {
+  importScripts("quota.js");
+} catch (e) {
+  modulesReady = false;
+  console.error("[GLM Limits] не удалось загрузить quota.js:", e);
+}
+try {
+  importScripts("keyring.js");
+} catch (e) {
+  modulesReady = false;
+  console.error("[GLM Limits] не удалось загрузить keyring.js:", e);
+}
 
 const DEFAULTS = { apiKey: "", intervalSec: 120, viewMode: "popup", platform: "auto", notify: true };
 const VIEW_MODES = ["popup", "window", "compact"];
@@ -129,35 +143,83 @@ function normalizeWindow(item) {
   return GLMQuota.normalizeWindow(item);
 }
 
+// Читает manifest.json с диска (unpacked-расширение отдаёт файлы живьём).
+async function readDiskManifest() {
+  try {
+    const r = await fetch(chrome.runtime.getURL("manifest.json"), { cache: "no-store" });
+    if (!r.ok) return null;
+    const text = await r.text();
+    try {
+      return JSON.parse(text);
+    } catch (e) {
+      return null;   // файл дописывается прямо сейчас — не перезапускаемся
+    }
+  } catch (e) {
+    return null;
+  }
+}
+
+// Все ли файлы расширения на месте (нужно после git pull).
+async function modulesPresent() {
+  for (const f of ["quota.js", "keyring.js"]) {
+    try {
+      const r = await fetch(chrome.runtime.getURL(f), { cache: "no-store" });
+      if (!r.ok) return false;
+    } catch (e) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // Self-update for the unpacked flow, in two steps:
 //  1) disk vs loaded manifest — after `git pull` the file on disk already has
-//     the new version (unpacked files are served live): record lastUpdate,
-//     fire the "updated" notification and reload ourselves (no-op for packed);
+//     the new version. Перезапускаемся только когда убедились, что все
+//     файлы дописаны (иначе Chrome может признать расширение сломанным);
 //  2) upstream check on GitHub — if a newer version exists but is not pulled
 //     yet, notify once per version: update via the tray menu.
 async function checkForUpdate(st) {
   const ru = st.lang === "ru";
-  try {
-    const r = await fetch(chrome.runtime.getURL("manifest.json"), { cache: "no-store" });
-    const disk = await r.json();
-    const loaded = chrome.runtime.getManifest();
-    if (disk && disk.version && loaded && disk.version !== loaded.version) {
-      await chrome.storage.local.set({ lastUpdate: { version: disk.version, at: Date.now() } });
-      try {
-        chrome.notifications.create({
-          type: "basic",
-          iconUrl: "icons/icon128.png",
-          title: "GLM Limits " + disk.version,
-          message: ru ? "Расширение успешно обновлено." : "Extension successfully updated.",
-        });
-      } catch (e) { /* уведомления недоступны — не критично */ }
-      console.info("[GLM Limits] new version on disk:", disk.version, "- reloading");
-      chrome.runtime.reload();
+
+  // 1) Применённое обновление на диске.
+  const disk = await readDiskManifest();
+  const loaded = chrome.runtime.getManifest();
+  if (disk && disk.version && loaded && disk.version !== loaded.version) {
+    // git pull мог быть в процессе — ждём и перепроверяем.
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    const again = await readDiskManifest();
+    const ready = again && again.version === disk.version && (await modulesPresent());
+    if (!ready) {
+      console.info("[GLM Limits] файлы обновления ещё не дописаны — перезапуск отложен");
       return;
     }
-  } catch (e) { /* best-effort */ }
+    await chrome.storage.local.set({
+      lastUpdate: { version: again.version, at: Date.now() },
+      updateAvailable: null,          // обновление применено — метку снимаем
+    });
+    try {
+      chrome.notifications.create({
+        type: "basic",
+        iconUrl: "icons/icon128.png",
+        title: "GLM Limits — " + again.version,
+        message: ru
+          ? "Расширение обновлено до версии " + again.version + "."
+          : "Extension updated to version " + again.version + ".",
+      });
+    } catch (e) { /* уведомления недоступны — не критично */ }
+    console.info("[GLM Limits] новая версия на диске:", again.version, "- перезапуск");
+    chrome.runtime.reload();
+    return;
+  }
+  // Уже актуальная версия — снимаем метку «доступно обновление», если была.
+  try {
+    const stg = await chrome.storage.local.get("updateAvailable");
+    if (stg.updateAvailable && stg.updateAvailable.version === (disk && disk.version)) {
+      await chrome.storage.local.set({ updateAvailable: null });
+    }
+  } catch (e) { /* не критично */ }
 
-  // Сетевая проверка GitHub — не чаще раза в 30 минут, иначе это ~720
+  // 2) Сетевая проверка GitHub — не чаще раза в 30 минут, иначе это ~720
   // запросов в сутки на пустом месте.
   try {
     const store = await chrome.storage.local.get(["updNotified", "lastUpdateCheck"]);
@@ -166,10 +228,13 @@ async function checkForUpdate(st) {
     const r = await fetch(RAW_MANIFEST_URL, { cache: "no-store" });
     if (!r.ok) return;
     const remote = await r.json();
-    const loaded = chrome.runtime.getManifest();
     if (remote && remote.version && loaded &&
         remote.version !== loaded.version && store.updNotified !== remote.version) {
-      await chrome.storage.local.set({ updNotified: remote.version });
+      await chrome.storage.local.set({
+        updNotified: remote.version,
+        // Постоянная метка: она видна в попапе, а не только во всплывашке.
+        updateAvailable: { version: remote.version, at: Date.now() },
+      });
       chrome.notifications.create({
         type: "basic",
         iconUrl: "icons/icon128.png",
@@ -177,6 +242,7 @@ async function checkForUpdate(st) {
         message: ru
           ? "Новая версия " + remote.version + ". Обнови: иконка в трее → «Обновить расширение»."
           : "New version " + remote.version + ". Update via the tray menu → \"Update extension\".",
+        requireInteraction: true,   // не спрячется само — пока пользователь не закроет
       });
     }
   } catch (e) { /* нет сети или GitHub недоступен — молча */ }
@@ -192,6 +258,14 @@ async function poll() {
   pollInFlight = true;
   try {
     const st = await getSettings();
+    if (!modulesReady) {
+      // Файлы расширения дописываются прямо сейчас (git pull) — не падаем,
+      // а объясняем пользователю, что надо нажать Reload.
+      await chrome.storage.local.set({
+        latest: { ok: false, error: "Extension files are incomplete — press Reload in chrome://extensions", ts: Date.now() },
+      });
+      return null;
+    }
     await checkForUpdate(st);
     const apiKey = await GLMKeyring.getApiKey();
     if (!apiKey) {

@@ -128,10 +128,34 @@ test("notifyDecision: новое окно сброса перезаряжает 
 });
 
 test("formatAmount: разделители разрядов по языку", () => {
-  // ru-RU в современной ICU ставит узкий неразрывный пробел (U+202F) —
-  // приводим к обычному пробелу перед сравнением.
   const norm = (s) => s.replace(/[  ]/g, " ");
   assert.equal(norm(GLMQuota.formatAmount(26913, "ru")), "26 913");
   assert.equal(norm(GLMQuota.formatAmount(26913, "en")), "26,913");
   assert.equal(GLMQuota.formatAmount(null, "ru"), null);
+});
+
+test("hourlyActivity: расход раскладывается по часам суток (0..23)", () => {
+  const now = new Date(2026, 9, 22, 15, 0, 0).getTime();   // 15:00 по местному
+  const pts = [
+    { ts: now - 3600e3, v: 10 },   // 14:00
+    { ts: now - 1800e3, v: 25 },   // 14:30 → +15
+    { ts: now - 600e3, v: 30 },    // 14:50 → +5
+  ];
+  const buckets = GLMQuota.hourlyActivity(pts, now);
+  assert.equal(buckets.length, 24);
+  assert.equal(buckets[14].value, 20, "в час 14 должно быть 15 + 5");
+  assert.equal(buckets[14].has, true);
+  assert.equal(buckets[3].has, false, "пустой час не отмечается");
+  assert.equal(buckets[3].value, 0);
+});
+
+test("hourlyActivity: сброс окна не считается активностью", () => {
+  const now = new Date(2026, 9, 22, 15, 0, 0).getTime();
+  const pts = [
+    { ts: now - 1800e3, v: 90 },
+    { ts: now - 600e3, v: 5 },   // окно сбросилось — это не расход
+  ];
+  const buckets = GLMQuota.hourlyActivity(pts, now);
+  assert.equal(buckets[14].value, 0, "откат (сброс) не должен попадать в активность");
+  assert.equal(buckets[14].has, false);
 });

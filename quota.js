@@ -130,10 +130,37 @@ const GLMQuota = (() => {
     }
   }
 
+  // Активность по часам суток: 24 столбца (часы 00..23), значение — сколько
+  // окна сожгли за этот час (сумма положительных приростов расхода).
+  // Так график показывает именно активность, а не «уровень окна» с его
+  // пилами на каждом сбросе.
+  function hourlyActivity(points, nowMs, windowHours) {
+    const hours = windowHours || 24;
+    const now = nowMs || Date.now();
+    const start = now - hours * 3600e3;
+    const buckets = new Array(24).fill(0);
+    const seen = new Array(24).fill(false);
+    const sorted = (Array.isArray(points) ? points : [])
+      .filter(p => p && typeof p.ts === "number" && typeof p.v === "number")
+      .slice()
+      .sort((a, b) => a.ts - b.ts);
+    for (let i = 1; i < sorted.length; i++) {
+      const prev = sorted[i - 1];
+      const cur = sorted[i];
+      if (cur.ts < start || cur.ts > now) continue;
+      const delta = cur.v - prev.v;
+      if (delta <= 0) continue;   // сброс окна или откат — не активность
+      const hour = new Date(cur.ts).getHours();
+      buckets[hour] += delta;
+      seen[hour] = true;
+    }
+    return buckets.map((value, hour) => ({ hour, value, has: seen[hour] }));
+  }
+
   const api = {
     TOKEN_TYPES, MONTHLY_TYPE, NOTIFY_THRESHOLDS, BADGE_COLORS,
     toNumber, normalizeWindow, parseLimits, detectPlatform,
-    badgeColor, badgeText, notifyDecision, formatAmount,
+    badgeColor, badgeText, notifyDecision, formatAmount, hourlyActivity,
   };
 
   if (typeof globalThis !== "undefined") globalThis.GLMQuota = api;

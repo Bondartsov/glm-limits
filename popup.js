@@ -9,6 +9,8 @@ const I18N = {
     popout: "Open in window", settings: "Settings",
     statusOffline: "Offline", statusOnline: "Online",
     statusError: "Error", loading: "Loading…",
+    swUnreachable: "Extension is not responding — press Reload in chrome://extensions",
+    updateAvailable: "version {v} available",
     session: "Session (5h)", weekly: "Weekly", mcp: "MCP",
     apiKey: "API Key",
     apiKeyHint: "Your GLM Coding Plan API key. Stored locally, sent only to the quota endpoint.",
@@ -46,6 +48,8 @@ const I18N = {
     popout: "Открыть в окне", settings: "Настройки",
     statusOffline: "Нет связи", statusOnline: "Онлайн",
     statusError: "Ошибка", loading: "Загрузка…",
+    swUnreachable: "Расширение не отвечает — нажми Reload в chrome://extensions",
+    updateAvailable: "доступна версия {v}",
     session: "Сессия (5ч)", weekly: "Неделя", mcp: "MCP",
     apiKey: "API-ключ",
     apiKeyHint: "Ваш API-ключ GLM Coding Plan. Хранится локально, уходит только на endpoint квот.",
@@ -85,6 +89,7 @@ let latestData = null;
 let tickTimer = null;
 let historyData = [];
 let lastUpdateInfo = null;   // кэш lastUpdate — читаем из storage не каждый кадр
+let updateAvailableInfo = null;  // метка «доступна новая версия» (постоянная)
 
 // ── Helpers ──────────────────────────────────────────────
 function t(key) {
@@ -143,6 +148,62 @@ function fmtAt(epochMs) {
   if (d.toDateString() === tomorrow.toDateString()) return t("tomorrow").replace("HH:MM", timeStr);
   const dayName = d.toLocaleDateString([], { weekday: "short" });
   return dayName + " " + timeStr;
+}
+
+// ── Часовой график активности ───────────────────────────────
+// 24 столбца по часам суток (00..23) + подписи оси — видно, в какие часы
+// шла работа, а не просто «кривая без координат».
+function renderHourlyChart(el, buckets) {
+  if (!el) return;
+  const list = Array.isArray(buckets) ? buckets : [];
+  if (!list.some((b) => b && b.has)) { el.style.display = "none"; return; }
+  el.style.display = "block";
+
+  const W = 328, H = 30, AXIS_H = 11;
+  const max = Math.max(1, ...list.map((b) => b.value));
+  const slot = W / 24;
+  const nowHour = new Date().getHours();
+  const NS = "http://www.w3.org/2000/svg";
+
+  while (el.firstChild) el.removeChild(el.firstChild);
+
+  for (const b of list) {
+    const x = b.hour * slot + 1;
+    const w = slot - 2;
+    if (!b.has) {
+      const ghost = document.createElementNS(NS, "rect");
+      ghost.setAttribute("x", String(x));
+      ghost.setAttribute("y", String(H - 2));
+      ghost.setAttribute("width", String(w));
+      ghost.setAttribute("height", "2");
+      ghost.setAttribute("style", "fill:var(--track)");
+      el.appendChild(ghost);
+      continue;
+    }
+    const h = Math.max(2, (b.value / max) * (H - 2));
+    const rect = document.createElementNS(NS, "rect");
+    rect.setAttribute("x", String(x));
+    rect.setAttribute("y", String(H - h));
+    rect.setAttribute("width", String(w));
+    rect.setAttribute("height", String(h));
+    rect.setAttribute("rx", "1.5");
+    const isNow = b.hour === nowHour;
+    rect.setAttribute("style", isNow
+      ? "fill:var(--accent)"
+      : "fill:var(--accent);opacity:" + (0.35 + 0.55 * (b.value / max)).toFixed(2));
+    el.appendChild(rect);
+  }
+
+  // Ось часов: 00 / 06 / 12 / 18 / 23
+  for (const hour of [0, 6, 12, 18, 23]) {
+    const label = document.createElementNS(NS, "text");
+    label.setAttribute("x", String(hour * slot + slot / 2));
+    label.setAttribute("y", String(H + 8));
+    label.setAttribute("text-anchor", "middle");
+    label.setAttribute("style", "fill:var(--text-muted);font-size:8px");
+    label.textContent = String(hour).padStart(2, "0");
+    el.appendChild(label);
+  }
 }
 
 // ── Sparkline ────────────────────────────────────────────
@@ -308,18 +369,33 @@ async function loadLastUpdate() {
   }
 }
 
+// Постоянная метка «доступно обновление» — она видна в попапе всегда,
+// а не только во всплывающем уведомлении.
+async function loadUpdateInfo() {
+  try {
+    const r = await chrome.storage.local.get("updateAvailable");
+    updateAvailableInfo = r.updateAvailable || null;
+  } catch (e) {
+    updateAvailableInfo = null;
+  }
+}
+
 function render(data) {
   latestData = data;
   if (!data || !data.ok) {
     const errTxt = (data && data.error) ? String(data.error) : t("statusError");
-    setStatus("error", errTxt);
+    setStatus("error", t("statusError"));
+    // Текст ошибки — в тело попапа, а не только в строку статуса.
+    $("loading").textContent = errTxt;
     $("loading").style.display = "";
     $("fullView").style.display = "none";
     $("compactView").style.display = "none";
     return;
   }
 
-  setStatus("online", t("statusOnline"));
+  setStatus("online", t("statusOnline") + (updateAvailableInfo
+    ? " · ↑ " + t("updateAvailable").replace("{v}", updateAvailableInfo.version)
+    : ""));
   $("loading").style.display = "none";
 
   const viewMode = normalizeViewMode(currentSettings.viewMode);
@@ -335,9 +411,12 @@ function render(data) {
     const sResetsAt = (data.s && data.s.resetsAt) ? new Date(data.s.resetsAt).getTime() : null;
     const wResetsAt = (data.w && data.w.resetsAt) ? new Date(data.w.resetsAt).getTime() : null;
     showMetric("metricSession", "sessionPct", "sessionBar", "sessionReset", data.s,
-      "sessionSpark", windowSeries("s", sResetsAt));
+      null, null);
     showMetric("metricWeekly", "weeklyPct", "weeklyBar", "weeklyReset", data.w,
       "weeklySpark", windowSeries("w", wResetsAt));
+    // Активность сессии по часам суток (шкала 00..23).
+    renderHourlyChart($("sessionChart"), GLMQuota.hourlyActivity(
+      historyData.map(p => ({ ts: p.ts, v: p.s })), Date.now()));
     if (currentSettings.showMcp && data.mcp) {
       showMetric("metricMcp", "mcpPct", "mcpBar", "mcpReset", data.mcp);
     } else {
@@ -372,8 +451,11 @@ async function loadSettings() {
     "platform", "intervalSec", "viewMode",
     "lang", "theme", "showMcp", "notify", "badge", "badgeMetric", "badgeMode"
   ]);
-  const persisted = await GLMKeyring.hasPersistedKey();
+  const stored = await chrome.storage.local.get("keyPersist");
+  // По умолчанию ключ запоминается — но в зашифрованном виде.
+  const persist = stored.keyPersist !== false;
   const hasKey = Boolean(await GLMKeyring.getApiKey());
+  const persisted = persist && hasKey;
   currentSettings = {
     platform: normalizePlatform(r.platform),
     intervalSec: r.intervalSec || 120,
@@ -385,7 +467,7 @@ async function loadSettings() {
     badge: r.badge !== false,
     badgeMetric: r.badgeMetric === "w" ? "w" : "s",
     badgeMode: r.badgeMode === "used" ? "used" : "remaining",
-    keyPersist: persisted
+    keyPersist: persist
   };
   currentLang = currentSettings.lang;
 
@@ -399,14 +481,14 @@ async function loadSettings() {
   $("badgeCheck").checked = currentSettings.badge;
   $("badgeMetricSelect").value = currentSettings.badgeMetric;
   $("badgeModeSelect").value = currentSettings.badgeMode;
-  $("keyPersistCheck").checked = persisted;
+  $("keyPersistCheck").checked = persist;
 
   // Сам ключ никогда не показываем и не подставляем в поле — только статус.
   $("apiKeyInput").value = "";
   $("apiKeyInput").placeholder = hasKey ? "••••••••" : "glm_… / zai_…";
   $("keyState").textContent = !hasKey
     ? t("keyStateNone")
-    : (persisted ? t("keyStatePersisted") : t("keyStateSession"));
+    : (persist ? t("keyStatePersisted") : t("keyStateSession"));
 
   applyI18n();
   applyTheme(currentSettings.theme);
@@ -460,15 +542,27 @@ async function resetSettings() {
 }
 
 // ── Polling ───────────────────────────────────────────────
+// Таймаут запроса к service worker: если он мёртв (например, после неудачного
+// обновления), попап не должен висеть на «Загрузка…» бесконечно.
+const POLL_TIMEOUT_MS = 6000;
+
+function withTimeout(promise, ms) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), ms)),
+  ]);
+}
+
 async function poll() {
   try {
-    const r = await chrome.runtime.sendMessage({ type: "poll" });
+    const r = await withTimeout(chrome.runtime.sendMessage({ type: "poll" }), POLL_TIMEOUT_MS);
     await loadHistory();
     await loadLastUpdate();
+    await loadUpdateInfo();
     render(r && r.ok ? r : { ok: false });
   } catch (e) {
     await loadHistory();
-    render({ ok: false });
+    render({ ok: false, error: t("swUnreachable") });
   }
 }
 
@@ -583,6 +677,7 @@ async function init() {
   await loadSettings();
   await loadHistory();
   await loadLastUpdate();
+  await loadUpdateInfo();
   // Fast path: show cached latest immediately (background may have polled via alarm).
   const cached = await chrome.storage.local.get("latest");
   if (cached.latest) render(cached.latest);
@@ -632,6 +727,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
   if (changes.lastUpdate) {
     loadLastUpdate().then(() => render(latestData));
+  }
+  if (changes.updateAvailable) {
+    loadUpdateInfo().then(() => render(latestData));
   }
   if (changes.lang) {
     currentSettings.lang = changes.lang.newValue || "en";

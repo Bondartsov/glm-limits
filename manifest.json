@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "GLM Limits",
-  "version": "0.6.0",",
+  "version": "0.6.1",
   "description": "Остаток лимитов GLM Coding Plan: 5-часовая сессия и неделя — одним взглядом.",
   "icons": {
     "16": "icons/icon16.png",

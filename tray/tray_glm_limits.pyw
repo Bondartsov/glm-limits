@@ -91,6 +91,10 @@ STRINGS = {
         "reset": "сброс через", "refresh": "Обновить данные",
         "details": "Показать детали", "exit": "Выход",
         "upd_ext": "Обновить расширение",
+        "upd_available": "Доступна версия {v}",
+        "upd_no_available": "Обновлений нет",
+        "upd_done_ver": "Обновлено до версии {v}",
+        "upd_incomplete": "Обновление неполное — файлы расширения повреждены, перезапуск отменён",
         "autostart": "Автозапуск при входе в Windows",
         "upd_done": "Расширение обновлено. Само перезапустится за пару минут — или кликни по его иконке.",
         "upd_none": "Уже последняя версия.",
@@ -117,6 +121,10 @@ STRINGS = {
         "reset": "resets in", "refresh": "Refresh data",
         "details": "Show details", "exit": "Exit",
         "upd_ext": "Update extension",
+        "upd_available": "Version {v} available",
+        "upd_no_available": "Up to date",
+        "upd_done_ver": "Updated to version {v}",
+        "upd_incomplete": "Update incomplete — extension files are damaged, restart skipped",
         "autostart": "Start with Windows",
         "upd_done": "Extension updated. It will reload itself within a couple of minutes — or click its icon.",
         "upd_none": "Already up to date.",
@@ -548,6 +556,7 @@ class TrayApp:
         self.icon: pystray.Icon | None = None
         self._detail_win: Any = None
         self._key_win: Any = None
+        self._remote_version: str | None = None
         self.current_cfg: dict[str, Any] = load_config()
         # Флаги уведомлений живут на диске: перезапуск трея не должен приводить
         # к повторному «80%» в том же окне сброса.
@@ -732,15 +741,85 @@ class TrayApp:
             if not after or before == after:
                 self._notify_tray(self.tr("upd_none"))
                 return
+            # После pull проверяем целостность: если файлы дописались не все,
+            # расширение нельзя перезапускать — оно станет «сломанным».
+            if not self._validate_repo():
+                logger.error("Обновление получилось неполным — перезапуск отменён")
+                self._notify_tray(STRINGS[lang]["upd_incomplete"])
+                return
             if self._git_touched_tray(before, after):
                 # Обновились файлы самого трея — текущий процесс со старым
                 # кодом: перезапускаем себя, чтобы новый код заработал сразу.
                 self.restart_self(self.tr("tray_restarting"))
             else:
-                self._notify_tray(self.tr("upd_done"))
+                self._notify_tray(STRINGS[lang]["upd_done_ver"].format(v=read_repo_version()))
         except Exception as exc:
             logger.exception("Обновление расширения не удалось")
             self._notify_tray(STRINGS[lang]["upd_fail"].format(e=str(exc)[:80]))
+
+    @staticmethod
+    def _validate_repo() -> bool:
+        """После git pull проверяем, что расширение на диске целое: manifest
+        читается и все ключевые файлы на месте. Иначе перезапуск сделает
+        расширение сломанным (Chrome такие удаляет при следующем старте)."""
+        try:
+            manifest = json.loads((REPO_DIR / "manifest.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            logger.error("manifest.json не читается после обновления")
+            return False
+        if not manifest.get("version"):
+            logger.error("В manifest.json нет версии")
+            return False
+        for f in ("background.js", "popup.js", "popup.html", "popup.css",
+                  "quota.js", "keyring.js"):
+            if not (REPO_DIR / f).exists():
+                logger.error("После обновления отсутствует файл %s", f)
+                return False
+        return True
+
+    def _start_update_watch(self) -> None:
+        """Фоновый следящий: проверяет origin/main и держит метку
+        «доступна версия X» — её видно в меню трея постоянно."""
+        threading.Thread(target=self._update_watch_loop, name="update-watch",
+                         daemon=True).start()
+
+    def _update_watch_loop(self) -> None:
+        while not self.stop_evt.is_set():
+            try:
+                self._remote_version = self._fetch_remote_version()
+                if self.icon:
+                    self.icon.update_menu()
+            except Exception:
+                logger.exception("Проверка обновлений не удалась")
+            self.stop_evt.wait(600)
+
+    @staticmethod
+    def _fetch_remote_version() -> str | None:
+        """Версия в origin/main, если она новее локальной."""
+        try:
+            subprocess.run(
+                ["git", "-C", str(REPO_DIR), "fetch", "--quiet", "origin", "main"],
+                capture_output=True, text=True, timeout=60,
+                encoding="utf-8", errors="replace",
+            )
+            proc = subprocess.run(
+                ["git", "-C", str(REPO_DIR), "show", "origin/main:manifest.json"],
+                capture_output=True, text=True, timeout=15,
+                encoding="utf-8", errors="replace",
+            )
+            if proc.returncode != 0:
+                return None
+            data = json.loads(proc.stdout)
+            remote = str(data.get("version") or "")
+            local = read_repo_version()
+            return remote if remote and remote != local else None
+        except Exception:
+            logger.exception("Не удалось получить версию из репозитория")
+            return None
+
+    def line_update(self, *args: Any) -> str:
+        v = getattr(self, "_remote_version", None)
+        return self.tr("upd_available").format(v=v) if v else self.tr("upd_no_available")
 
     @staticmethod
     def _git_head() -> str | None:
@@ -885,6 +964,7 @@ class TrayApp:
     def build_menu(self) -> pystray.Menu:
         return pystray.Menu(
             pystray.MenuItem(self.line_version, None, enabled=False),
+            pystray.MenuItem(self.line_update, None, enabled=False),
             pystray.MenuItem(self.line_session, None, enabled=False),
             pystray.MenuItem(self.line_weekly, None, enabled=False),
             pystray.MenuItem(self.line_reset, None, enabled=False),
@@ -1038,6 +1118,7 @@ class TrayApp:
             APP_NAME, render_icon(None, COLOR_GRAY), APP_NAME, menu=self.build_menu()
         )
         logger.info("Трей-иконка запущена")
+        self._start_update_watch()
         self.icon.run()
 
 
