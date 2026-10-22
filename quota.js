@@ -157,12 +157,17 @@ const GLMQuota = (() => {
     return buckets.map((value, hour) => ({ hour, value, has: seen[hour] }));
   }
 
-  // Активность по дням недели: 7 столбцов (0 = понедельник … 6 = воскресенье),
-  // значение — сколько окна сожгли в этот день.
-  function dailyActivity(points, nowMs, windowDays) {
-    const days = windowDays || 7;
+  // Активность по дням ТЕКУЩЕЙ недели: 7 столбцов (0 = понедельник …
+  // 6 = воскресенье). Будущие дни пустые — данные прошлой недели в них
+  // не подмешиваются.
+  function dailyActivity(points, nowMs) {
     const now = nowMs || Date.now();
-    const start = now - days * 24 * 3600e3;
+    const d = new Date(now);
+    const dow = (d.getDay() + 6) % 7;   // 0 = понедельник
+    const weekStart = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    weekStart.setDate(weekStart.getDate() - dow);
+    const start = weekStart.getTime();
+
     const buckets = new Array(7).fill(0);
     const seen = new Array(7).fill(false);
     const sorted = (Array.isArray(points) ? points : [])
@@ -175,35 +180,57 @@ const GLMQuota = (() => {
       if (cur.ts < start || cur.ts > now) continue;
       const delta = cur.v - prev.v;
       if (delta <= 0) continue;
-      const dow = (new Date(cur.ts).getDay() + 6) % 7;   // 0 = понедельник
-      buckets[dow] += delta;
-      seen[dow] = true;
+      const day = Math.min(6, Math.max(0, Math.floor((cur.ts - start) / 86400e3)));
+      buckets[day] += delta;
+      seen[day] = true;
     }
     return buckets.map((value, index) => ({ index, value, has: seen[index] }));
   }
 
   // Скользящее окно активности: spanHours столбцов вокруг текущего часа
-  // (beforeHours слева, остальное справа). Ночные часы не занимают место —
-  // шкала показывает только то, что рядом с «сейчас».
+  // (beforeHours слева, остальное справа). Бакеты — по РЕАЛЬНЫМ часовым
+  // слотам окна, поэтому будущие часы всегда пустые (вчерашняя активность
+  // в тот же час суток туда не подмешивается).
   function activityWindow(points, nowMs, spanHours, beforeHours) {
     const span = spanHours || 6;
     const before = beforeHours == null ? Math.floor(span / 2) : beforeHours;
     const now = nowMs || Date.now();
-    const nowHour = new Date(now).getHours();
-    const buckets = hourlyActivity(points, now, 24);
+
+    const nowHourStart = new Date(now);
+    nowHourStart.setMinutes(0, 0, 0);
+    const nowHourMs = nowHourStart.getTime();
+    const start = nowHourMs - before * 3600e3;
+
     const bars = [];
     for (let i = 0; i < span; i++) {
-      const hour = (nowHour - before + i + 48) % 24;
-      const b = buckets[hour] || { hour, value: 0, has: false };
+      const slotStart = start + i * 3600e3;
       bars.push({
-        hour,
-        value: b.value,
-        has: b.has,
+        hour: new Date(slotStart).getHours(),
+        startMs: slotStart,
+        value: 0,
+        has: false,
         isNow: i === before,
-        isFuture: i > before,
+        isFuture: slotStart > nowHourMs,
       });
     }
-    return { bars, span, before, nowHour };
+
+    const sorted = (Array.isArray(points) ? points : [])
+      .filter(p => p && typeof p.ts === "number" && typeof p.v === "number")
+      .slice()
+      .sort((a, b) => a.ts - b.ts);
+    for (let i = 1; i < sorted.length; i++) {
+      const prev = sorted[i - 1];
+      const cur = sorted[i];
+      const delta = cur.v - prev.v;
+      if (delta <= 0) continue;   // сброс окна или откат
+      if (cur.ts < start || cur.ts >= start + span * 3600e3) continue;
+      const idx = Math.floor((cur.ts - start) / 3600e3);
+      if (idx < 0 || idx >= span) continue;
+      bars[idx].value += delta;
+      bars[idx].has = true;
+    }
+
+    return { bars, span, before, nowHourMs };
   }
 
   const api = {

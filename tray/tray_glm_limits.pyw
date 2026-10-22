@@ -267,6 +267,19 @@ def write_protected_key(key: str) -> bool:
         return False
 
 
+def enable_dpi_awareness() -> None:
+    """Делает процесс DPI-aware, иначе Windows растягивает окно как картинку
+    (шрифты и отступы «плывут» на мониторах с масштабированием 125–150%)."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)   # SYSTEM_DPI_AWARE
+        logger.info("DPI awareness включён")
+    except Exception:
+        logger.info("DPI awareness недоступен (старая Windows)")
+
+
 def detect_platform(key: str) -> str:
     """Эвристика платформы — та же, что в background.js расширения."""
     k = (key or "").strip()
@@ -1043,8 +1056,8 @@ class TrayApp:
 
         win = tk.Tk()
         win.title(f"{APP_NAME} v{ext_version}")
-        win.geometry("330x360")
-        win.resizable(False, False)
+        win.geometry("330x360")   # стартовый размер, дальше подгоняем под контент
+        win.resizable(True, True)
         win.attributes("-topmost", True)
         win.configure(bg=c["bg"])
         self._detail_win = win
@@ -1179,6 +1192,14 @@ class TrayApp:
                                   if ts else ""))
             win.after(1000, tick)
 
+        # Подгоняем окно под реальный размер содержимого (с учётом шрифтов
+        # и масштаба экрана) — иначе футер обрезается.
+        win.update_idletasks()
+        fit_w = max(330, win.winfo_reqwidth())
+        fit_h = max(340, win.winfo_reqheight())
+        win.geometry(f"{fit_w}x{fit_h}")
+        win.minsize(fit_w, 320)
+
         tick()
         try:
             win.mainloop()
@@ -1221,6 +1242,7 @@ def selftest() -> int:
 
 def main(argv: list[str]) -> int:
     setup_logging()
+    enable_dpi_awareness()
     if _IMPORT_ERROR is not None:
         msg = (f"Не хватает зависимостей: {_IMPORT_ERROR}. "
                "Установи их: pip install -r tray/requirements.txt (или запусти tray_install.bat)")

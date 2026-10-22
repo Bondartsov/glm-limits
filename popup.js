@@ -216,8 +216,8 @@ function sessionWindow() {
     const nextMs = new Date(s.resetsAt).getTime();
     // Границы окна: прошлый сброс (≈5 ч назад) и следующий.
     for (const ms of [nextMs, nextMs - 5 * 3600e3]) {
-      const hour = new Date(ms).getHours();
-      const idx = win.bars.findIndex((b) => b.hour === hour);
+      const idx = win.bars.findIndex(
+        (b) => ms >= b.startMs && ms < b.startMs + 3600e3);
       if (idx >= 0 && !marks.includes(idx)) marks.push(idx);
     }
   }
@@ -252,7 +252,10 @@ function renderTimeChart(el, bars, labels, opts) {
   if (!list.some((b) => b && b.has)) { el.style.display = "none"; return; }
   el.style.display = "block";
 
-  const W = 328, H = (opts && opts.barH) || 30;
+  const W = 328;
+  const laneH = 9;                       // полка для отметок — над столбцами
+  const barH = (opts && opts.barH) || 30;
+  const H = laneH + barH;                // базовая линия столбцов
   const max = Math.max(1, ...list.map((b) => b.value));
   const slot = W / list.length;
   const NS = "http://www.w3.org/2000/svg";
@@ -271,7 +274,7 @@ function renderTimeChart(el, bars, labels, opts) {
       rect.setAttribute("style", b.isFuture
         ? "fill:var(--track);opacity:.35" : "fill:var(--track)");
     } else {
-      const h = Math.max(2, (b.value / max) * (H - 2));
+      const h = Math.max(2, (b.value / max) * (barH - 2));
       rect.setAttribute("x", String(x));
       rect.setAttribute("y", String(H - h));
       rect.setAttribute("width", String(w));
@@ -284,7 +287,8 @@ function renderTimeChart(el, bars, labels, opts) {
     el.appendChild(rect);
   });
 
-  // Отметка «сейчас» — сплошная линия акцентом.
+  // Отметки живут на верхней полке и не наезжают на столбцы:
+  // «сейчас» — контрастная сплошная (цвет текста), «сброс» — красная пунктирная.
   const nowIndex = opts && opts.nowIndex;
   if (nowIndex != null && nowIndex >= 0) {
     const x = nowIndex * slot + slot / 2;
@@ -292,21 +296,32 @@ function renderTimeChart(el, bars, labels, opts) {
     line.setAttribute("x1", String(x));
     line.setAttribute("x2", String(x));
     line.setAttribute("y1", "0");
-    line.setAttribute("y2", String(H));
-    line.setAttribute("style", "stroke:var(--accent);stroke-width:1.5");
+    line.setAttribute("y2", String(laneH - 2));
+    line.setAttribute("style", "stroke:var(--text);stroke-width:2");
     el.appendChild(line);
+    const dot = document.createElementNS(NS, "circle");
+    dot.setAttribute("cx", String(x));
+    dot.setAttribute("cy", String(laneH - 1.5));
+    dot.setAttribute("r", "1.8");
+    dot.setAttribute("style", "fill:var(--text)");
+    el.appendChild(dot);
   }
 
-  // Отметки сброса окна — пунктирная линия другим цветом.
   ((opts && opts.resets) || []).forEach((idx) => {
     const x = idx * slot + slot / 2;
     const line = document.createElementNS(NS, "line");
     line.setAttribute("x1", String(x));
     line.setAttribute("x2", String(x));
     line.setAttribute("y1", "0");
-    line.setAttribute("y2", String(H));
-    line.setAttribute("style", "stroke:var(--hot);stroke-width:1.5;stroke-dasharray:3 2");
+    line.setAttribute("y2", String(laneH - 2));
+    line.setAttribute("style", "stroke:var(--risk);stroke-width:2;stroke-dasharray:2.5 1.5");
     el.appendChild(line);
+    const dot = document.createElementNS(NS, "circle");
+    dot.setAttribute("cx", String(x));
+    dot.setAttribute("cy", String(laneH - 1.5));
+    dot.setAttribute("r", "1.8");
+    dot.setAttribute("style", "fill:var(--risk)");
+    el.appendChild(dot);
   });
 
   // Подписи.
@@ -315,7 +330,7 @@ function renderTimeChart(el, bars, labels, opts) {
     node.setAttribute("x", String(i * slot + slot / 2));
     node.setAttribute("y", String(H + 8));
     node.setAttribute("text-anchor", "middle");
-    node.setAttribute("style", "fill:" + (i === nowIndex ? "var(--accent)" : "var(--muted)") +
+    node.setAttribute("style", "fill:" + (i === nowIndex ? "var(--text)" : "var(--muted)") +
       ";font-size:" + (labels.length > 8 ? "7px" : "9px"));
     node.textContent = label;
     el.appendChild(node);
@@ -342,8 +357,8 @@ function renderLegend(el, items) {
 
 function updateChartLegends() {
   const items = [
-    { color: "var(--accent)", label: t("legendNow") },
-    { color: "var(--hot)", dashed: true, label: t("legendReset") },
+    { color: "var(--text)", label: t("legendNow") },
+    { color: "var(--risk)", dashed: true, label: t("legendReset") },
   ];
   renderLegend($("sessionLegend"), items);
   renderLegend($("weeklyLegend"), items);
