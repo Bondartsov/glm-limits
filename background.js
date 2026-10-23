@@ -305,7 +305,7 @@ async function poll() {
       console.warn("[GLM Limits] history update failed:", e);
     }
     try {
-      await maybeNotify(st, fiveHour);
+      await maybeNotify(st, fiveHour, sevenDay);
     } catch (e) {
       console.warn("[GLM Limits] notification failed:", e);
     }
@@ -359,36 +359,66 @@ async function appendHistory(sUtil, wUtil) {
   } catch (e) {}
 }
 
-// One-shot notifications when session usage crosses 80% / 90% / 100%.
-// Flags are scoped to the reset window (resetsAt): внутри одного окна каждый
-// порог срабатывает ровно один раз, поэтому 81%, 82%, 83%... не спамят.
-async function maybeNotify(st, fiveHour) {
-  if (!st.notify || !fiveHour || typeof fiveHour.utilization !== "number") return;
-  const used = fiveHour.utilization;
-  // Ключ окна: время сброса, а при его отсутствии — пятичасовой слот,
-  // иначе флаги залипнут навсегда на одном "unknown".
-  const winKey = fiveHour.resetsAt ||
-    ("slot:" + Math.floor(Date.now() / (5 * 3600 * 1000)));
-  const stg = await chrome.storage.local.get("notifState");
-  // Решение «звучать ли и о каком пороге» — чистая функция в quota.js.
-  const decision = GLMQuota.notifyDecision(stg.notifState, used, winKey);
-  if (decision.threshold != null) {
-    fireNotification(st.lang, used, decision.threshold);
-  }
-  await chrome.storage.local.set({ notifState: decision.state });
+// One-shot notifications when usage crosses 80% / 90% / 100% — отдельно для
+// сессии и для недели. Флаги привязаны к окну сброса: 81%, 82%, 83%... не спамят.
+async function maybeNotify(st, fiveHour, sevenDay) {
+  if (!st.notify) return;
+  await checkNotifyOne(st, "s", fiveHour);
+  await checkNotifyOne(st, "w", sevenDay);
 }
 
-function fireNotification(lang, used, threshold) {
+async function checkNotifyOne(st, kind, win) {
+  if (!win || typeof win.utilization !== "number") return;
+  const used = win.utilization;
+  const slotMs = kind === "s" ? 5 * 3600e3 : 7 * 24 * 3600e3;
+  const winKey = win.resetsAt || ("slot:" + kind + ":" + Math.floor(Date.now() / slotMs));
+  const stg = await chrome.storage.local.get("notifState");
+  const all = (stg.notifState && typeof stg.notifState === "object") ? stg.notifState : {};
+  // Решение «звучать ли и о каком пороге» — чистая функция в quota.js.
+  const decision = GLMQuota.notifyDecision(all[kind], used, winKey);
+  if (decision.threshold != null) {
+    fireNotification(st.lang, kind, used, decision.threshold, win.resetsAt);
+  }
+  all[kind] = decision.state;
+  await chrome.storage.local.set({ notifState: all });
+}
+
+// Момент сброса по-человечески: «3h 52m (сегодня в 16:56)»; для недели
+// дата: «6d 22h (27.10, 12:56)».
+function formatReset(lang, iso) {
+  if (!iso) return "";
+  const ms = new Date(iso).getTime();
+  if (!ms) return "";
+  const diff = Math.max(0, ms - Date.now());
+  const h = Math.floor(diff / 3600e3);
+  const m = Math.floor((diff % 3600e3) / 60e3);
+  const cd = h >= 24
+    ? (Math.floor(h / 24) + "d " + (h % 24) + "h")
+    : (h > 0 ? (h + "h " + m + "m") : (m + "m"));
+  const d = new Date(ms);
+  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const date = d.toLocaleDateString([], { day: "2-digit", month: "2-digit" });
+  const sameDay = d.toDateString() === new Date().toDateString();
+  const when = sameDay
+    ? (lang === "ru" ? "сегодня в " : "today at ") + time
+    : (lang === "ru" ? date + " в " + time : date + ", " + time);
+  return " " + (lang === "ru" ? "Сброс через " : "Resets in ") + cd + " (" + when + ").";
+}
+
+function fireNotification(lang, kind, used, threshold, resetsAt) {
   const ru = lang === "ru";
-  const remaining = Math.max(0, Math.round(100 - used));
+  const name = kind === "s" ? (ru ? "Сессия" : "Session") : (ru ? "Неделя" : "Weekly");
+  const shortName = kind === "s" ? (ru ? "сессия" : "session") : (ru ? "неделя" : "weekly");
+  const left = Math.max(0, Math.round(100 - used));
+  const reset = formatReset(lang, resetsAt);
   const message = ru
-    ? "Сессия израсходована на " + Math.round(used) + "%. До сброса осталось " + remaining + "%."
-    : "Session is " + Math.round(used) + "% used. " + remaining + "% left before reset.";
+    ? name + ": израсходовано " + Math.round(used) + "%. Осталось " + left + "% лимита." + reset
+    : name + ": " + Math.round(used) + "% used. " + left + "% of the limit left." + reset;
   try {
     chrome.notifications.create({
       type: "basic",
       iconUrl: "icons/icon128.png",
-      title: "GLM Limits — " + threshold + "%",
+      title: "GLM Limits — " + shortName + " " + threshold + "%",
       message,
     });
   } catch (e) {}

@@ -36,7 +36,7 @@ import sys
 import threading
 import time
 import traceback
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -469,6 +469,26 @@ def fmt_countdown(iso: str | None, lang: str) -> str:
     return f"{m}m"
 
 
+def fmt_reset_moment(iso: str | None, lang: str) -> str:
+    """«сегодня в 16:56» / «завтра в 09:00» / «27.10 в 12:56» — понятная
+    привязка сброса, а не голое время."""
+    if not iso:
+        return ""
+    try:
+        dt = datetime.fromisoformat(iso).astimezone()
+    except ValueError:
+        return ""
+    now = datetime.now()
+    clock = dt.strftime("%H:%M")
+    if dt.date() == now.date():
+        return f"сегодня в {clock}" if lang == "ru" else f"today at {clock}"
+    if dt.date() == (now + timedelta(days=1)).date():
+        return f"завтра в {clock}" if lang == "ru" else f"tomorrow at {clock}"
+    if lang == "ru":
+        return f"{dt:%d.%m} в {clock}"
+    return f"{dt:%d.%m}, {clock}"
+
+
 def fmt_at_time(iso: str | None) -> str:
     """Локальное время сброса в формате HH:MM."""
     if not iso:
@@ -543,7 +563,8 @@ def load_notif_state() -> dict[str, Any]:
     try:
         if STATE_PATH.exists():
             data = json.loads(STATE_PATH.read_text(encoding="utf-8"))
-            if isinstance(data, dict):
+            # Новый формат: {"s": {...}, "w": {...}}. Старый (плоский) отбрасываем.
+            if isinstance(data, dict) and all(isinstance(v, dict) for v in data.values()):
                 return data
     except (OSError, json.JSONDecodeError):
         logger.exception("Не удалось прочитать состояние уведомлений")
@@ -581,7 +602,7 @@ class State:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._data: dict[str, Any] = {"ok": False, "error": None}
-        self.notif: dict[str, Any] = {"win": None, "s80": False, "s90": False, "s100": False}
+        self.notif: dict[str, Any] = {"s": {}, "w": {}}
 
     def set(self, data: dict[str, Any]) -> None:
         with self._lock:
@@ -692,34 +713,55 @@ class TrayApp:
 
     # ── уведомления 80/90% ───────────────────────────────────
     def check_notifications(self, cfg: dict[str, Any], data: dict[str, Any]) -> None:
-        """По одному уведомлению на порог (80/90/100) в пределах окна сброса."""
-        s = data.get("s")
-        if not cfg["notify"] or not s:
+        """По одному уведомлению на порог (80/90/100) в пределах окна сброса —
+        отдельно для сессии и для недели."""
+        if not cfg["notify"]:
             return
-        used = float(s["used"])
-        win = s.get("resets_at")
-        n = self.state.notif
-        if n["win"] != win:
-            n["win"] = win
+        for kind, name_key in (("s", "session"), ("w", "weekly")):
+            win_data = data.get(kind)
+            if win_data:
+                self._check_one(cfg, kind, name_key, win_data)
+
+    def _check_one(self, cfg: dict[str, Any], kind: str, name_key: str,
+                   win_data: dict[str, Any]) -> None:
+        used = float(win_data["used"])
+        win = win_data.get("resets_at")
+        state = self.state.notif.setdefault(kind, {})
+        if state.get("win") != win:
+            state["win"] = win
             for th in NOTIFY_THRESHOLDS:
-                n[f"s{th}"] = False
+                state[f"t{th}"] = False
         for th in NOTIFY_THRESHOLDS:
-            if used >= th and not n.get(f"s{th}"):
-                # Порог пройден — нижние считаем пройденными тоже: одно
-                # уведомление вместо каскада, без дублей.
+            if used >= th and not state.get(f"t{th}"):
+                # Порог пройден — нижние считаем пройденными: одно уведомление.
                 for lower in NOTIFY_THRESHOLDS:
                     if lower <= th:
-                        n[f"s{lower}"] = True
+                        state[f"t{lower}"] = True
                 if self.icon:
-                    msg = STRINGS[cfg["lang"]]["notify"].format(u=int(used), l=int(100 - used))
                     try:
-                        self.icon.notify(msg, APP_NAME)
+                        self.icon.notify(
+                            self._notify_text(cfg["lang"], name_key, used, win),
+                            f"{APP_NAME} — {self.tr(name_key)} {th}%",
+                        )
                     except Exception:
                         logger.exception("Не удалось показать уведомление")
-                save_notif_state(n)
+                save_notif_state(self.state.notif)
                 break
 
-    # ── поток опроса ─────────────────────────────────────────
+    def _notify_text(self, lang: str, name_key: str, used: float,
+                     resets_at: str | None) -> str:
+        """Текст уведомления: сколько израсходовано, сколько ОСТАЛОСЬ ЛИМИТА
+        и когда сброс (время, для недели — дата)."""
+        name = self.tr(name_key)
+        left = max(0, int(round(100 - used)))
+        cd = fmt_countdown(resets_at, lang)
+        when = fmt_reset_moment(resets_at, lang)
+        if lang == "ru":
+            tail = f" Сброс через {cd} ({when})." if resets_at else ""
+            return f"{name}: израсходовано {int(used)}%. Осталось {left}% лимита.{tail}"
+        tail = f" Resets in {cd} ({when})." if resets_at else ""
+        return f"{name}: {int(used)}% used. {left}% of the limit left.{tail}"
+
     def poll_worker(self) -> None:
         streak = 0
         while not self.stop_evt.is_set():

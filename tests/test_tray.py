@@ -8,6 +8,7 @@
 import importlib.util
 import os
 import sys
+from datetime import datetime, timedelta, timezone
 import tempfile
 import unittest
 from pathlib import Path
@@ -169,6 +170,28 @@ class TestNotifications(unittest.TestCase):
         app.check_notifications(cfg, {"s": {"used": 80, "resets_at": "w1"}})
         app.check_notifications(cfg, {"s": {"used": 95, "resets_at": "w2"}})
         self.assertEqual(len(app.icon.messages), 2, "в новом окне порог срабатывает снова")
+
+
+    def test_notify_text_session_has_limit_and_reset(self):
+        app = tray.TrayApp()
+        iso = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+        txt = app._notify_text("ru", "session", 81, iso)
+        self.assertIn("Осталось 19% лимита", txt)
+        self.assertIn("Сброс через", txt)
+        self.assertNotIn("До сброса", txt, "старая двусмысленная формулировка не должна вернуться")
+
+    def test_notify_text_weekly_has_date(self):
+        app = tray.TrayApp()
+        iso = (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()
+        txt = app._notify_text("ru", "weekly", 76, iso)
+        self.assertIn("Осталось 24% лимита", txt)
+        self.assertRegex(txt, r"\d{2}\.\d{2} в \d{2}:\d{2}", "у недели должна быть дата сброса")
+
+    def test_notify_text_without_reset(self):
+        app = tray.TrayApp()
+        txt = app._notify_text("ru", "session", 85, None)
+        self.assertIn("Осталось 15% лимита", txt)
+        self.assertNotIn("Сброс", txt)
 
     def test_disabled_notifications(self):
         app = tray.TrayApp()

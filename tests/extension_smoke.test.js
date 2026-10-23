@@ -314,3 +314,39 @@ test("popup.js: ключ из settings сохраняется через keyring
   assert.equal(chrome._session.apiKey, "id.secret", "ключ должен лежать в session-хранилище");
   assert.equal(chrome._local.apiKey, undefined, "открытого ключа в local быть не должно");
 });
+
+test("уведомление: «осталось X% лимита» + время сброса (без «до сброса осталось %»)", () => {
+  const chrome = makeChromeMock();
+  const dom = makeDomMock(POPUP_IDS);
+  const ctx = makeContext(chrome, dom, {
+    importScripts: (...files) => { for (const f of files) runScript(ctx, f); },
+    fetch: async () => ({ ok: false, status: 500, json: async () => ({}) }),
+  });
+  runScript(ctx, "background.js");
+
+  const iso = new Date(Date.now() + 2 * 3600e3).toISOString();
+  ctx.fireNotification("ru", "s", 81, 80, iso);
+  const n = chrome._calls.notifications[0];
+  assert.ok(n, "уведомление должно создаться");
+  assert.ok(n.message.includes("Осталось 19% лимита"), n.message);
+  assert.ok(n.message.includes("Сброс через"), n.message);
+  assert.ok(!n.message.includes("До сброса осталось"), n.message);
+  assert.ok(n.title.includes("сессия 80%"), n.title);
+});
+
+test("уведомление недели содержит дату сброса", () => {
+  const chrome = makeChromeMock();
+  const dom = makeDomMock(POPUP_IDS);
+  const ctx = makeContext(chrome, dom, {
+    importScripts: (...files) => { for (const f of files) runScript(ctx, f); },
+    fetch: async () => ({ ok: false, status: 500, json: async () => ({}) }),
+  });
+  runScript(ctx, "background.js");
+
+  const iso = new Date(Date.now() + 3 * 86400e3).toISOString();
+  ctx.fireNotification("ru", "w", 92, 90, iso);
+  const n = chrome._calls.notifications[0];
+  assert.ok(n.message.includes("Осталось 8% лимита"), n.message);
+  assert.match(n.message, /(\d{2}[.\/]\d{2})/, "должна быть дата сброса: " + n.message);
+  assert.ok(n.title.includes("неделя 90%"), n.title);
+});
