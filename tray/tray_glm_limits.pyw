@@ -1089,11 +1089,15 @@ class TrayApp:
 
         win = tk.Toplevel(self._root)
         win.title(APP_NAME)
-        win.geometry("330x360")   # стартовый размер, дальше подгоняем под контент
-        win.resizable(True, True)
+        win.geometry("340x430")
+        win.minsize(320, 400)
         win.attributes("-topmost", True)
         win.configure(bg=c["bg"])
+        win.columnconfigure(0, weight=1)
         self._detail_win = win
+
+        # Состояние для перерисовки при изменении размера окна.
+        view = {"used": None, "week": None, "mcp": None, "ts": None, "host": ""}
 
         def on_close() -> None:
             self._detail_win = None
@@ -1101,59 +1105,21 @@ class TrayApp:
 
         win.protocol("WM_DELETE_WINDOW", on_close)
 
-        # Шапка
+        # ── Шапка ──
         head = tk.Frame(win, bg=c["bg"])
-        head.pack(fill="x", padx=16, pady=(14, 0))
+        head.grid(row=0, column=0, sticky="ew", padx=16, pady=(12, 0))
         tk.Label(head, text=APP_NAME, font=("Segoe UI", 12, "bold"),
                  fg=c["text"], bg=c["bg"]).pack(side="left")
         tk.Label(head, text=f"v{ext_version}", font=("Segoe UI", 9),
                  fg=c["muted"], bg=c["bg"]).pack(side="right")
-        if upd_time:
-            tk.Label(win, text=f"{self.tr('updated_at')}: {upd_time}", font=("Segoe UI", 9),
-                     fg=c["muted"], bg=c["bg"]).pack(anchor="w", padx=16, pady=(1, 0))
+        tk.Label(win, text=f"{self.tr('updated_at')}: {upd_time}" if upd_time else "",
+                 font=("Segoe UI", 9), fg=c["muted"], bg=c["bg"],
+                 anchor="w").grid(row=1, column=0, sticky="ew", padx=16, pady=(1, 0))
 
-        # Кольцо: расход сессии, в центре — остаток
-        ring = tk.Canvas(win, width=120, height=120, bg=c["bg"], highlightthickness=0)
-        ring.pack(pady=(10, 0))
-        ring.create_oval(8, 8, 112, 112, outline=c["line"], width=10)
-        ring.create_text(60, 54, text="—", font=("Segoe UI", 22, "bold"),
-                         fill=c["text"], tags="value")
-        ring.create_text(60, 80, text="", font=("Segoe UI", 9),
-                         fill=c["muted"], tags="caption")
-        cap = tk.Label(win, text="", font=("Segoe UI", 10), fg=c["muted"], bg=c["bg"])
-        cap.pack(pady=(4, 0))
-
-        # Мини-график активности: скользящее окно часов вокруг «сейчас»
-        chart = tk.Canvas(win, width=298, height=34, bg=c["bg"], highlightthickness=0)
-        chart.pack(pady=(10, 0))
-
-        # Строки: неделя и MCP
-        rows = {}
-
-        def make_row(key: str, title: str) -> None:
-            wrap = tk.Frame(win, bg=c["bg"])
-            wrap.pack(fill="x", padx=16)
-            tk.Label(wrap, text=title, font=("Segoe UI", 10), fg=c["muted"],
-                     bg=c["bg"]).pack(side="left")
-            val = tk.Label(wrap, text="—", font=("Segoe UI", 12, "bold"), fg=c["text"],
-                           bg=c["bg"])
-            val.pack(side="right")
-            rows[key] = val
-
-        tk.Frame(win, height=1, bg=c["line"]).pack(fill="x", padx=16, pady=(12, 3))
-        make_row("w", self.tr("weekly"))
-        make_row("mcp", self.tr("mcp"))
-
-        # Подвал: хост, время данных и кнопка обновления
-        foot = tk.Frame(win, bg=c["bg"])
-        foot.pack(fill="x", padx=16, pady=(12, 12))
-        # Кнопку пакуем ПЕРВОЙ, иначе длинный текст выдавливает её за край.
-        tk.Button(foot, text="⟳", command=self.wake.set, bg=c["card"], fg=c["text"],
-                  activebackground=c["line"], activeforeground=c["text"], relief="flat",
-                  width=3, cursor="hand2").pack(side="right")
-        foot_lbl = tk.Label(foot, text="", font=("Segoe UI", 9), fg=c["muted"],
-                            bg=c["bg"], anchor="w")
-        foot_lbl.pack(side="left", fill="x", expand=True)
+        # ── Кольцо (растягивается, шрифт масштабируется) ──
+        ring = tk.Canvas(win, bg=c["bg"], width=220, height=150, highlightthickness=0)
+        ring.grid(row=2, column=0, sticky="nsew", padx=16, pady=(8, 0))
+        win.rowconfigure(2, weight=1)   # забирает всё лишнее место
 
         def color_for_used(used: float) -> str:
             if used < 50:
@@ -1164,29 +1130,93 @@ class TrayApp:
                 return c["hot"]
             return c["risk"]
 
+        def draw_ring() -> None:
+            ring.delete("all")
+            w = max(ring.winfo_width(), 120)
+            h = max(ring.winfo_height(), 110)
+            size = min(w, h) - 12
+            x0 = (w - size) / 2
+            y0 = (h - size) / 2
+            thick = max(6, int(size / 14))
+            ring.create_oval(x0, y0, x0 + size, y0 + size, outline=c["line"], width=thick)
+            used = view["used"]
+            if used is None:
+                ring.create_text(w / 2, h / 2, text="—",
+                                 font=("Segoe UI", max(14, int(size / 5)), "bold"),
+                                 fill=c["text"])
+                return
+            ring.create_arc(x0, y0, x0 + size, y0 + size, start=90,
+                            extent=-359.9 * (used / 100.0), style="arc",
+                            width=thick, outline=color_for_used(used))
+            ring.create_text(w / 2, h / 2 - size * 0.02, text=f"{100 - int(used)}%",
+                             font=("Segoe UI", max(16, int(size / 5)), "bold"),
+                             fill=c["text"])
+            ring.create_text(w / 2, h / 2 + size * 0.16, text=self.tr("left"),
+                             font=("Segoe UI", max(8, int(size / 16))), fill=c["muted"])
+
+        ring.bind("<Configure>", lambda event: draw_ring())
+
+        # ── Подпись под кольцом ──
+        cap = tk.Label(win, text="", font=("Segoe UI", 10), fg=c["muted"], bg=c["bg"])
+        cap.grid(row=3, column=0, sticky="ew", padx=16, pady=(4, 0))
+
+        # ── Мини-график (растягивается по ширине) ──
+        chart = tk.Canvas(win, bg=c["bg"], width=220, height=40, highlightthickness=0)
+        chart.grid(row=4, column=0, sticky="ew", padx=16, pady=(8, 0))
+
         def draw_chart() -> None:
-            """Скользящее окно: 3 часа назад и 3 вперёд."""
             chart.delete("all")
+            w = max(chart.winfo_width(), 200)
+            hgt = max(chart.winfo_height(), 30)
             buckets = self._hourly_buckets()
             now = datetime.now()
             hours = [(now.hour - 3 + i) % 24 for i in range(6)]
-            values = [buckets.get(h, 0.0) for h in hours]
+            values = [buckets.get(hour, 0.0) for hour in hours]
             peak = max(values) if values else 0.0
-            slot = 298 / 6
+            slot = w / 6
+            base = hgt - 11
             for i, (hour, value) in enumerate(zip(hours, values)):
-                x = i * slot + 6
-                w = slot - 12
-                h = max(2, (value / peak) * 20) if peak > 0 and value > 0 else 2
-                if i == 3:      # текущий час — акцентом
-                    color = c["accent"]
-                elif value > 0:
-                    color = c["ok"]
-                else:
-                    color = c["line"]
-                chart.create_rectangle(x, 22 - h, x + w, 22, fill=color, outline="")
-                chart.create_text(x + w / 2, 30, text=f"{hour:02d}",
+                x = i * slot + max(3, slot * 0.12)
+                bw = max(4, slot * 0.76)
+                bh = max(2, (value / peak) * (base - 4)) if peak > 0 and value > 0 else 2
+                color = c["accent"] if i == 3 else (c["ok"] if value > 0 else c["line"])
+                chart.create_rectangle(x, base - bh, x + bw, base, fill=color, outline="")
+                chart.create_text(x + bw / 2, hgt - 4, text=f"{hour:02d}",
                                   fill=c["accent"] if i == 3 else c["muted"],
                                   font=("Segoe UI", 8))
+            # Отметка «сейчас» — на полке над столбцами.
+            cx = 3 * slot + slot / 2
+            chart.create_line(cx, 0, cx, 5, fill=c["text"], width=2)
+
+        chart.bind("<Configure>", lambda event: draw_chart())
+
+        # ── Строки «Неделя» и «MCP» ──
+        rows: dict[str, tk.Label] = {}
+
+        def make_row(row: int, key: str, title: str) -> None:
+            wrap = tk.Frame(win, bg=c["bg"])
+            wrap.grid(row=row, column=0, sticky="ew", padx=16)
+            tk.Label(wrap, text=title, font=("Segoe UI", 10), fg=c["muted"],
+                     bg=c["bg"]).pack(side="left")
+            val = tk.Label(wrap, text="—", font=("Segoe UI", 12, "bold"), fg=c["text"],
+                           bg=c["bg"])
+            val.pack(side="right")
+            rows[key] = val
+
+        tk.Frame(win, height=1, bg=c["line"]).grid(row=5, column=0, sticky="ew",
+                                                   padx=16, pady=(10, 3))
+        make_row(6, "w", self.tr("weekly"))
+        make_row(7, "mcp", self.tr("mcp"))
+
+        # ── Подвал (прижат к низу за счёт растянутого кольца) ──
+        foot = tk.Frame(win, bg=c["bg"])
+        foot.grid(row=8, column=0, sticky="ew", padx=16, pady=(10, 12))
+        tk.Button(foot, text="⟳", command=self.wake.set, bg=c["card"], fg=c["text"],
+                  activebackground=c["line"], activeforeground=c["text"], relief="flat",
+                  width=3, cursor="hand2").pack(side="right")
+        foot_lbl = tk.Label(foot, text="", font=("Segoe UI", 9), fg=c["muted"],
+                            bg=c["bg"], anchor="w")
+        foot_lbl.pack(side="left", fill="x", expand=True)
 
         def tick() -> None:
             if self._detail_win is not win:
@@ -1199,47 +1229,40 @@ class TrayApp:
             d = self.state.snapshot()
             ok = bool(d.get("ok"))
             s = d.get("s") if ok else None
+
+            used = float(s["used"]) if s else None
+            if used != view["used"]:
+                view["used"] = used
+                draw_ring()
             if s:
-                used = float(s["used"])
-                ring.delete("arc")
-                ring.create_arc(8, 8, 112, 112, start=90, extent=-359.9 * (used / 100.0),
-                                style="arc", width=10, outline=color_for_used(used))
-                ring.itemconfigure("value", text=f"{100 - int(used)}%")
-                ring.itemconfigure("caption", text=self.tr("left"))
                 cap.config(text=f"{self.tr('session')} · {self.tr('reset')} "
                                 f"{fmt_countdown(s['resets_at'], lang)}")
             else:
-                ring.itemconfigure("value", text="—")
-                ring.itemconfigure("caption", text="")
-                cap.config(text=self.tr("no_data"))
+                cap.config(text=self.tr("no_data") if not ok else "")
+
             for key, source in (("w", "w"), ("mcp", "mcp")):
                 win_data = d.get(source) if ok else None
                 if win_data:
                     used_w = float(win_data["used"])
-                    rows[key].config(text=f"{100 - int(used_w)}%",
-                                     fg=color_for_used(used_w))
+                    rows[key].config(text=f"{100 - int(used_w)}%", fg=color_for_used(used_w))
                 else:
                     rows[key].config(text="—", fg=c["muted"])
+
             draw_chart()
             ts = d.get("ts")
-            host = HOSTS.get(d.get("platform"), "")
-            # Только хост (без https://) и короткое время — иначе строка
-            # не помещается в окно.
-            short_host = host.replace("https://", "").replace("http://", "")
-            label = (f"{time.strftime('%H:%M', time.localtime(ts))} · {short_host}"
-                     if ts else "")
-            foot_lbl.config(text=label[:42])
+            host = HOSTS.get(d.get("platform"), "").replace("https://", "").replace("http://", "")
+            foot_lbl.config(text=(f"{time.strftime('%H:%M', time.localtime(ts))} · {host}"
+                                  if ts else "")[:42])
             win.after(1000, tick)
 
-        # Подгоняем окно под реальный размер содержимого (с учётом шрифтов
-        # и масштаба экрана) — иначе футер обрезается.
         win.update_idletasks()
-        fit_w = max(330, win.winfo_reqwidth())
-        fit_h = max(340, win.winfo_reqheight())
+        fit_w = max(340, win.winfo_reqwidth())
+        fit_h = max(400, win.winfo_reqheight())
         win.geometry(f"{fit_w}x{fit_h}")
-        win.minsize(fit_w, 320)
 
         tick()
+        win.after(60, draw_ring)
+        win.after(60, draw_chart)
 
     def run(self) -> None:
         """pystray — в фоновом потоке, Tk — в главном: Tk из чужого потока
