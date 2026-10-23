@@ -99,6 +99,7 @@ STRINGS = {
         "reset": "сброс через", "refresh": "Обновить данные",
         "details": "Показать детали", "exit": "Выход",
         "upd_ext": "Обновить расширение",
+        "auto_update": "Автообновление",
         "upd_available": "Доступна версия {v}",
         "upd_no_available": "Обновлений нет",
         "upd_done_ver": "Обновлено до версии {v}",
@@ -131,6 +132,7 @@ STRINGS = {
         "reset": "resets in", "refresh": "Refresh data",
         "details": "Show details", "exit": "Exit",
         "upd_ext": "Update extension",
+        "auto_update": "Auto-update",
         "upd_available": "Version {v} available",
         "upd_no_available": "Up to date",
         "upd_done_ver": "Updated to version {v}",
@@ -336,6 +338,19 @@ def parse_model_usage(data: dict[str, Any] | None) -> dict[str, Any] | None:
     return {"models": models, "total": total}
 
 
+def set_auto_update(enabled: bool) -> bool:
+    """Сохраняет настройку автообновления (ключ API не трогается)."""
+    data = _read_config_raw()
+    data["autoUpdate"] = bool(enabled)
+    try:
+        CONFIG_PATH.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return True
+    except OSError:
+        logger.exception("Не удалось записать настройку автообновления")
+        return False
+
+
 def detect_platform(key: str) -> str:
     """Эвристика платформы — та же, что в background.js расширения."""
     k = (key or "").strip()
@@ -388,6 +403,7 @@ def load_config() -> dict[str, Any]:
     return {
         "apiKey": api_key,
         "valueMode": "used" if str(cfg.get("valueMode") or "").lower() == "used" else "remaining",
+        "autoUpdate": cfg.get("autoUpdate") is True,
         "platform": platform if platform in PLATFORMS else "auto",
         "intervalSec": interval,
         "lang": "en" if str(cfg.get("lang") or "ru").lower() == "en" else "ru",
@@ -650,6 +666,7 @@ class TrayApp:
         self._remote_version: str | None = None
         self._history: list[tuple[float, float]] = []   # (ts, израсходовано %)
         self._model_usage: dict[str, Any] | None = None
+        self._updating = False
         self._ui_queue: queue.Queue = queue.Queue()     # действия в потоке Tk
         self._root: Any = None
         self.current_cfg: dict[str, Any] = load_config()
@@ -713,6 +730,17 @@ class TrayApp:
 
     def _display_word(self) -> str:
         return self.tr("used") if self.current_cfg.get("valueMode") == "used" else self.tr("left")
+
+    def on_toggle_auto_update(self, icon: pystray.Icon, item: pystray.MenuItem) -> None:
+        enabled = not bool(self.current_cfg.get("autoUpdate", False))
+        if not set_auto_update(enabled):
+            self._notify_tray(self.tr("error"))
+            return
+        self.current_cfg["autoUpdate"] = enabled
+        logger.info("Автообновление: %s", "вкл" if enabled else "выкл")
+        self._notify_tray(self.tr("auto_update") + ": " + ("вкл" if enabled else "выкл")
+                          if self.current_cfg["lang"] == "ru"
+                          else self.tr("auto_update") + ": " + ("on" if enabled else "off"))
 
     def on_toggle_value_mode(self, icon: pystray.Icon, item: pystray.MenuItem) -> None:
         current = self.current_cfg.get("valueMode", "remaining")
@@ -958,6 +986,17 @@ class TrayApp:
                 self._remote_version = self._fetch_remote_version()
                 if self.icon:
                     self.icon.update_menu()
+                # Автообновление: новая версия в origin/main — тянем и
+                # перезапускаемся сами (расширение подхватит само).
+                if (self._remote_version and self.current_cfg.get("autoUpdate")
+                        and not self._updating):
+                    logger.info("Автообновление: найдена версия %s — обновляюсь",
+                                self._remote_version)
+                    self._updating = True
+                    try:
+                        self._update_extension_worker()
+                    finally:
+                        self._updating = False
             except Exception:
                 logger.exception("Проверка обновлений не удалась")
             self.stop_evt.wait(600)
@@ -1143,6 +1182,11 @@ class TrayApp:
             pystray.MenuItem(
                 lambda item: self.tr("value_mode_" + self.current_cfg.get("valueMode", "remaining")),
                 self.on_toggle_value_mode),
+            pystray.MenuItem(
+                lambda item: self.tr("auto_update"),
+                self.on_toggle_auto_update,
+                checked=lambda item: bool(self.current_cfg.get("autoUpdate", False)),
+                radio=False),
             pystray.MenuItem(lambda item: self.tr("upd_ext"), self.update_extension),
             pystray.MenuItem(lambda item: self.tr("key_menu"), self.open_key_dialog),
             pystray.MenuItem(

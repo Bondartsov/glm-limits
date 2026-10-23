@@ -276,6 +276,16 @@ class TestValueMode(unittest.TestCase):
         app.current_cfg["valueMode"] = "used"
         self.assertEqual(app._display(40), 40)
 
+
+    def test_auto_update_default_off(self):
+        self.assertFalse(tray.load_config()["autoUpdate"])
+
+    def test_set_auto_update(self):
+        self.assertTrue(tray.set_auto_update(True))
+        self.assertTrue(tray.load_config()["autoUpdate"])
+        self.assertTrue(tray.set_auto_update(False))
+        self.assertFalse(tray.load_config()["autoUpdate"])
+
     def test_strings_for_both_modes(self):
         for lang in ("ru", "en"):
             for key in ("value_mode_remaining", "value_mode_used"):
