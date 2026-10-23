@@ -46,6 +46,7 @@ const I18N = {
     utilSpent: "used", utilLeft: "left",
     sessionLeft: "Left · session (5h)", weeklyLeft: "Left · weekly", mcpLeft: "Left · MCP",
     modelsTitle: "Usage by model",
+    modelsOther: "Others ({n})",
     modelsHint: "tokens today",
     chartHours: "activity by hour",
     chartDays: "spend by day of week",
@@ -99,6 +100,7 @@ const I18N = {
     utilSpent: "израсходовано", utilLeft: "осталось",
     sessionLeft: "Осталось · сессия (5ч)", weeklyLeft: "Осталось · неделя", mcpLeft: "Осталось · MCP",
     modelsTitle: "Расход по моделям",
+    modelsOther: "Другие ({n})",
     modelsHint: "токены за сегодня",
     chartHours: "активность по часам",
     chartDays: "расход по дням недели",
@@ -438,36 +440,59 @@ function renderModels(mu) {
   el.style.display = "";
   const colors = ["var(--accent)", "var(--ok)", "var(--warn)", "var(--hot)", "var(--risk)"];
 
+  // Топ-5 крупнейших + агрегат остальных: список не разрастается, а цвета
+  // не зацикливаются (раньше 6-я модель получала цвет первой).
+  const MAX_ROWS = 5;
+  const top = mu.models.slice(0, MAX_ROWS);
+  const rest = mu.models.slice(MAX_ROWS);
+  const restTotal = rest.reduce((sum, m) => sum + m.tokens, 0);
+  const restShare = mu.total > 0 ? restTotal / mu.total : 0;
+
   const bar = $("modelsBar");
   while (bar.firstChild) bar.removeChild(bar.firstChild);
-  mu.models.forEach((m, i) => {
+  top.forEach((m, i) => {
     const seg = document.createElement("span");
     seg.className = "share-seg";
     seg.style.width = (m.share * 100).toFixed(1) + "%";
     seg.style.background = colors[i % colors.length];
     bar.appendChild(seg);
   });
+  if (rest.length) {
+    const seg = document.createElement("span");
+    seg.className = "share-seg";
+    seg.style.width = (restShare * 100).toFixed(1) + "%";
+    seg.style.background = "var(--muted)";
+    seg.style.opacity = "0.55";
+    bar.appendChild(seg);
+  }
 
   const rows = $("modelsRows");
   while (rows.firstChild) rows.removeChild(rows.firstChild);
-  mu.models.forEach((m, i) => {
+
+  const addRow = (name, dotColor, tokens, share) => {
     const row = document.createElement("div");
     row.className = "model-row";
     const dot = document.createElement("i");
     dot.className = "model-dot";
-    dot.style.background = colors[i % colors.length];
-    const name = document.createElement("span");
-    name.className = "model-name";
-    name.textContent = m.name;
+    dot.style.background = dotColor;
+    const nameEl = document.createElement("span");
+    nameEl.className = "model-name";
+    nameEl.textContent = name;
     const val = document.createElement("span");
     val.className = "model-val";
-    val.textContent = GLMQuota.formatAmount(m.tokens, currentLang) +
-      " · " + Math.round(m.share * 100) + "%";
+    val.textContent = GLMQuota.formatAmount(tokens, currentLang) +
+      " · " + Math.round(share * 100) + "%";
     row.appendChild(dot);
-    row.appendChild(name);
+    row.appendChild(nameEl);
     row.appendChild(val);
     rows.appendChild(row);
-  });
+  };
+
+  top.forEach((m, i) => addRow(m.name, colors[i % colors.length], m.tokens, m.share));
+  if (rest.length) {
+    addRow(t("modelsOther").replace("{n}", rest.length), "var(--muted)",
+      restTotal, restShare);
+  }
   $("modelsAnno").textContent = GLMQuota.formatAmount(mu.total, currentLang);
 }
 // ── Рендеринг ─────────────────────────────────────────────

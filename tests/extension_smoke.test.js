@@ -351,3 +351,33 @@ test("уведомление недели содержит дату сброса
   assert.match(n.message, /(\d{2}[.\/]\d{2})/, "должна быть дата сброса: " + n.message);
   assert.ok(n.title.includes("неделя 90%"), n.title);
 });
+
+test("renderModels: топ-5 + агрегат «Другие», без зацикливания цветов", () => {
+  const chrome = makeChromeMock();
+  const dom = makeDomMock(POPUP_IDS);
+  const ctx = makeContext(chrome, dom, {
+    importScripts: (...files) => { for (const f of files) runScript(ctx, f); },
+  });
+  runScript(ctx, "quota.js");
+  runScript(ctx, "keyring.js");
+  runScript(ctx, "popup.js");
+
+  const models = [];
+  let total = 0;
+  for (let i = 1; i <= 7; i++) {
+    const tokens = 800 - i * 100;   // 700..100
+    models.push({ name: "M" + i, tokens, share: 0 });
+    total += tokens;
+  }
+  models.forEach((m) => { m.share = m.tokens / total; });
+
+  ctx.renderModels({ total, models });
+
+  const rows = dom.getElementById("modelsRows");
+  assert.equal(rows.children.length, 6, "5 моделей + одна строка «Другие»");
+  const last = rows.children[5];
+  assert.equal(last.children[1].textContent, "Others (2)", "агрегат называет количество");
+  assert.ok(last.children[2].textContent.includes("%"), last.children[2].textContent);
+  assert.equal(dom.getElementById("metricModels").style.display, "",
+    "карточка должна быть видимой");
+});

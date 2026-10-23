@@ -243,7 +243,11 @@ const GLMQuota = (() => {
     let total = 0;
     for (const item of list) {
       if (!item || typeof item !== "object") continue;
-      const tokens = toNumber(item.totalTokens) || 0;
+      // totalTokens есть в текущем API; если вдруг пропадёт — суммируем ряд.
+      let tokens = toNumber(item.totalTokens) || 0;
+      if (!tokens && Array.isArray(item.tokensUsage)) {
+        tokens = item.tokensUsage.reduce((s, v) => s + (toNumber(v) || 0), 0);
+      }
       if (tokens <= 0) continue;
       models.push({ name: String(item.modelName || "?"), tokens });
       total += tokens;

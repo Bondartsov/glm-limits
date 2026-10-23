@@ -212,3 +212,22 @@ test("parseModelUsage: доли по моделям, нулевые отбрас
   assert.equal(GLMQuota.parseModelUsage(null), null);
   assert.equal(GLMQuota.parseModelUsage({}), null);
 });
+
+test("parseModelUsage: fallback на tokensUsage, если нет totalTokens", () => {
+  const r = GLMQuota.parseModelUsage({ modelDataList: [
+    { modelName: "A", tokensUsage: [10, 20, 30] },
+    { modelName: "B", totalTokens: 60 },
+  ]});
+  assert.equal(r.total, 120);
+  assert.equal(r.models.length, 2);
+});
+
+test("parseModelUsage: семь моделей — все попадают, сортировка по убыванию", () => {
+  const list = [];
+  for (let i = 1; i <= 7; i++) list.push({ modelName: "M" + i, totalTokens: i * 100 });
+  const r = GLMQuota.parseModelUsage({ modelDataList: list });
+  assert.equal(r.models.length, 7);
+  assert.equal(r.models[0].name, "M7", "первая — самая крупная");
+  assert.equal(r.models[6].name, "M1");
+  assert.equal(r.total, 2800);
+});
