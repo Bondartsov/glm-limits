@@ -29,7 +29,7 @@ const I18N = {
     interval: "Refresh interval (sec)", viewMode: "View mode",
     viewPopup: "Popup", viewWindow: "Window", viewCompact: "Compact",
     language: "Language", theme: "Theme",
-    themeLight: "Light", themeDark: "Dark",
+    themeAuto: "System", themeLight: "Light", themeDark: "Dark",
     showMcp: "Show MCP usage",
     notifyLabel: "Notify at 80/90% of session",
     badgeLabel: "Show percent on icon",
@@ -41,6 +41,7 @@ const I18N = {
     trayTitle: "Tray app (Windows)",
     trayText: "Installed separately from the extension: run tray_install.bat in the project folder — it checks Python, installs dependencies, creates the config and enables autostart.",
     trayManual: "Open the manual",
+    diagRun: "Check setup",
     saved: "Saved", resetDone: "Settings reset",
     plan: "Plan",
     utilSpent: "used", utilLeft: "left",
@@ -83,7 +84,7 @@ const I18N = {
     interval: "Интервал обновления (сек)", viewMode: "Режим отображения",
     viewPopup: "Popup", viewWindow: "Окно", viewCompact: "Компактный",
     language: "Язык", theme: "Тема",
-    themeLight: "Светлая", themeDark: "Тёмная",
+    themeAuto: "Системная", themeLight: "Светлая", themeDark: "Тёмная",
     showMcp: "Показывать MCP",
     notifyLabel: "Уведомлять при 80/90% сессии",
     badgeLabel: "Процент на иконке",
@@ -95,6 +96,7 @@ const I18N = {
     trayTitle: "Приложение для трея (Windows)",
     trayText: "Ставится отдельно от расширения: запусти tray_install.bat в папке проекта — он проверит Python, поставит зависимости, создаст конфиг и включит автозапуск.",
     trayManual: "Открыть инструкцию",
+    diagRun: "Проверить настройку",
     saved: "Сохранено", resetDone: "Настройки сброшены",
     plan: "Тариф",
     utilSpent: "израсходовано", utilLeft: "осталось",
@@ -139,9 +141,19 @@ function normalizePlatform(v) {
   return PLATFORMS.includes(v) ? v : "auto";
 }
 
-// Legacy stored value "clay" maps to "light".
+// Legacy stored value "clay" maps to "light"; "auto" следует за системой.
 function normalizeTheme(v) {
+  if (v === "auto") return "auto";
   return v === "dark" ? "dark" : "light";
+}
+
+function resolveTheme(theme) {
+  if (theme !== "auto") return theme;
+  try {
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  } catch (e) {
+    return "light";
+  }
 }
 
 // Режим показа чисел: остаток (по умолчанию) или израсходовано.
@@ -658,6 +670,18 @@ function render(data) {
   showLine("metricWeekly", "weeklyPct", "weeklyBar", "weeklyReset", "weeklyAnno", data.w);
   if (currentSettings.showMcp && data.mcp) {
     showLine("metricMcp", "mcpPct", "mcpBar", "mcpReset", "mcpAnno", data.mcp);
+    // Разбивка MCP по инструментам (usageDetails в ответе квот).
+    const det = $("mcpDetails");
+    if (det) {
+      if (data.mcp.details && data.mcp.details.length) {
+        det.textContent = data.mcp.details
+          .map((d) => d.code + " " + GLMQuota.formatAmount(d.usage, currentLang))
+          .join(" · ");
+        det.style.display = "";
+      } else {
+        det.style.display = "none";
+      }
+    }
   } else {
     $("metricMcp").style.display = "none";
   }
@@ -699,7 +723,7 @@ function applyI18n() {
 }
 
 function applyTheme(theme) {
-  document.documentElement.setAttribute("data-theme", normalizeTheme(theme));
+  document.documentElement.setAttribute("data-theme", resolveTheme(normalizeTheme(theme)));
 }
 
 // ── Всплывающее подтверждение ─────────────────────────────
@@ -835,6 +859,86 @@ async function poll() {
   }
 }
 
+
+// ── Диагностика ───────────────────────────────────────────
+async function runDiagnostics() {
+  const out = $("diagOut");
+  if (!out) return;
+  out.style.display = "";
+  out.textContent = "Проверяю…";
+  const lines = [];
+  const mark = (okFlag, text) => lines.push((okFlag ? "✓ " : "✗ ") + text);
+  const t0 = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
+
+  mark(typeof GLMQuota !== "undefined",
+    "Модуль quota.js: " + (typeof GLMQuota !== "undefined" ? "загружен" : "НЕ загружен"));
+  mark(typeof GLMKeyring !== "undefined",
+    "Модуль keyring.js: " + (typeof GLMKeyring !== "undefined" ? "загружен" : "НЕ загружен"));
+  lines.push("Версия расширения: v" + chrome.runtime.getManifest().version);
+
+  let key = null;
+  try { key = await GLMKeyring.getApiKey(); } catch (e) { /* нет ключа */ }
+  mark(Boolean(key), key
+    ? "Ключ: задан (" + key.slice(0, 4) + "…" + key.slice(-4) + ", " + key.length + " симв.)"
+    : "Ключ: не задан");
+  if (!key) { out.textContent = lines.join("\n"); return; }
+
+  const stored = await chrome.storage.local.get("platform");
+  const plat = normalizePlatform(stored.platform);
+  const resolved = plat === "auto" ? GLMQuota.detectPlatform(key) : plat;
+  lines.push("Платформа: " + (plat === "auto" ? "авто → " : "") + resolved);
+  const host = resolved === "intl" ? "https://api.z.ai" : "https://open.bigmodel.cn";
+  lines.push("Хост: " + host);
+
+  // Квоты
+  const started = t0();
+  try {
+    const r = await withTimeout(fetch(host + "/api/monitor/usage/quota/limit", {
+      headers: { "Authorization": key, "Accept": "application/json" },
+    }), 10000);
+    const ms = Math.round(t0() - started);
+    if (r.ok) {
+      const body = await r.json();
+      const w = GLMQuota.parseLimits((body.data || {}).limits || []);
+      const parts = [];
+      if (w.session) parts.push("сессия " + Math.round(w.session.utilization) + "%");
+      if (w.weekly) parts.push("неделя " + Math.round(w.weekly.utilization) + "%");
+      if (w.mcp) parts.push("MCP");
+      mark(true, "API квот: HTTP " + r.status + " за " + ms + " мс" +
+        (parts.length ? " (" + parts.join(", ") + ")" : ""));
+      if (body.data && body.data.level) lines.push("Тариф: " + body.data.level);
+    } else {
+      mark(false, "API квот: HTTP " + r.status + " за " + ms + " мс — проверь ключ и платформу");
+    }
+  } catch (e) {
+    mark(false, "API квот: нет ответа (" + String((e && e.message) || e).slice(0, 60) + ")");
+  }
+
+  // Разбивка по моделям
+  try {
+    const day = fmtDateIso(new Date());
+    const url = host + "/api/monitor/usage/model-usage" +
+      "?startTime=" + encodeURIComponent(day + " 00:00:00") +
+      "&endTime=" + encodeURIComponent(day + " 23:59:59");
+    const r = await withTimeout(fetch(url, {
+      headers: { "Authorization": key, "Accept": "application/json" },
+    }), 10000);
+    if (r.ok) {
+      const body = await r.json();
+      const mu = GLMQuota.parseModelUsage(body && body.data);
+      mark(Boolean(mu), "Разбивка по моделям: " + (mu
+        ? mu.models.length + " модел(ей), " + GLMQuota.formatAmount(mu.total, currentLang) + " токенов"
+        : "нет данных"));
+    } else {
+      mark(false, "Разбивка по моделям: HTTP " + r.status);
+    }
+  } catch (e) {
+    mark(false, "Разбивка по моделям: нет ответа");
+  }
+
+  out.textContent = lines.join("\n");
+}
+
 // ── Переключатели ─────────────────────────────────────────
 function toggleCompact() {
   const next = currentSettings.viewMode === "compact" ? "popup" : "compact";
@@ -968,6 +1072,13 @@ async function init() {
   $("saveSettings").addEventListener("click", saveSettings);
   $("resetSettings").addEventListener("click", resetSettings);
   $("badgeCheck").addEventListener("change", updateBadgeField);
+  $("runDiag").addEventListener("click", runDiagnostics);
+  try {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    mq.addEventListener("change", () => {
+      if (currentSettings.theme === "auto") applyTheme("auto");
+    });
+  } catch (e) { /* без matchMedia живём как раньше */ }
   $("openManual").addEventListener("click", () => {
     chrome.tabs.create({ url: "https://github.com/Bondartsov/glm-limits/blob/main/MANUAL.md" });
   });

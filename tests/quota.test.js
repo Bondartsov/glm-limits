@@ -231,3 +231,22 @@ test("parseModelUsage: семь моделей — все попадают, со
   assert.equal(r.models[6].name, "M1");
   assert.equal(r.total, 2800);
 });
+
+test("normalizeWindow: разбирает usageDetails MCP по инструментам", () => {
+  const w = GLMQuota.normalizeWindow({
+    percentage: 2,
+    usageDetails: [
+      { modelCode: "web-reader", usage: 11 },
+      { modelCode: "search-prime", usage: 103 },
+      { modelCode: "zero", usage: 0 },
+    ],
+  });
+  assert.equal(w.details.length, 2, "нулевой инструмент отбрасывается");
+  assert.equal(w.details[0].code, "search-prime", "сортировка по убыванию");
+  assert.equal(w.details[0].usage, 103);
+  assert.equal(w.details[1].code, "web-reader");
+});
+
+test("normalizeWindow: без usageDetails поле details = null", () => {
+  assert.equal(GLMQuota.normalizeWindow({ percentage: 5 }).details, null);
+});

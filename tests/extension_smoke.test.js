@@ -128,14 +128,14 @@ const POPUP_IDS = [
   "sessionLegend",
   "metricWeekly", "weeklyPct", "weeklyAnno", "weeklyBar", "weeklyReset", "weeklyChart",
   "weeklyLegend",
-  "metricMcp", "mcpPct", "mcpAnno", "mcpBar", "mcpReset",
+  "metricMcp", "mcpPct", "mcpAnno", "mcpBar", "mcpReset", "mcpDetails",
   "metricModels", "modelsAnno", "modelsBar", "modelsRows",
   "planBadge", "compactView", "chipSession", "chipSessionPct", "chipWeekly", "chipWeeklyPct",
   "footer", "footReset", "footSource",
   "settingsPanel", "closeSettings", "apiKeyInput", "keyState", "keyPersistCheck",
   "platformSelect", "intervalInput", "viewModeSelect", "langSelect", "themeSelect",
   "showMcpCheck", "notifyCheck", "badgeCheck", "badgeMetricSelect", "badgeModeSelect",
-  "saveSettings", "resetSettings", "toast", "openManual",
+  "saveSettings", "resetSettings", "toast", "openManual", "runDiag", "diagOut",
   "refresh", "compact", "pin", "popout", "settings",
 ];
 
@@ -380,4 +380,71 @@ test("renderModels: топ-5 + агрегат «Другие», без заци�
   assert.ok(last.children[2].textContent.includes("%"), last.children[2].textContent);
   assert.equal(dom.getElementById("metricModels").style.display, "",
     "карточка должна быть видимой");
+});
+
+test("уведомление о сбросе: новое окно после истечения старого", async () => {
+  const chrome = makeChromeMock();
+  const dom = makeDomMock(POPUP_IDS);
+  const ctx = makeContext(chrome, dom, {
+    importScripts: (...files) => { for (const f of files) runScript(ctx, f); },
+    fetch: async () => ({ ok: false, status: 500, json: async () => ({}) }),
+  });
+  runScript(ctx, "background.js");
+
+  const past = new Date(Date.now() - 3600e3).toISOString();
+  const future = new Date(Date.now() + 4 * 3600e3).toISOString();
+  chrome._local.resetState = { s: { win: past } };
+
+  // Новое окно, свежий расход — это сброс.
+  await ctx.checkResetOne({ lang: "ru", notify: true }, "s", { resetsAt: future, utilization: 3 });
+  const n = chrome._calls.notifications[0];
+  assert.ok(n, "уведомление о сбросе должно создаться");
+  assert.ok(n.message.includes("сброшена"), n.message);
+  assert.ok(n.message.includes("Следующий сброс через"), n.message);
+  assert.ok(n.title.includes("сессия сброшена"), n.title);
+});
+
+test("уведомление о сбросе: то же окно — тишина", async () => {
+  const chrome = makeChromeMock();
+  const dom = makeDomMock(POPUP_IDS);
+  const ctx = makeContext(chrome, dom, {
+    importScripts: (...files) => { for (const f of files) runScript(ctx, f); },
+    fetch: async () => ({ ok: false, status: 500, json: async () => ({}) }),
+  });
+  runScript(ctx, "background.js");
+
+  const future = new Date(Date.now() + 4 * 3600e3).toISOString();
+  chrome._local.resetState = { s: { win: future } };
+  await ctx.checkResetOne({ lang: "ru", notify: true }, "s", { resetsAt: future, utilization: 3 });
+  assert.equal(chrome._calls.notifications.length, 0, "без смены окна уведомлений нет");
+});
+
+test("диагностика: отчёт содержит проверки ключа, API и моделей", async () => {
+  const chrome = makeChromeMock();
+  const dom = makeDomMock(POPUP_IDS);
+  const ctx = makeContext(chrome, dom, {
+    importScripts: (...files) => { for (const f of files) runScript(ctx, f); },
+    fetch: async (url) => {
+      const u = String(url);
+      if (u.includes("model-usage")) {
+        return { ok: true, status: 200, json: async () => ({ data: { modelDataList: [{ modelName: "M", totalTokens: 10 }] } }) };
+      }
+      return {
+        ok: true, status: 200,
+        json: async () => ({ data: { level: "max", limits: [{ type: "TOKENS_LIMIT", unit: 3, number: 5, percentage: 12 }] } }),
+      };
+    },
+  });
+  runScript(ctx, "quota.js");
+  runScript(ctx, "keyring.js");
+  runScript(ctx, "popup.js");
+
+  chrome._session.apiKey = "id.secret";
+  await ctx.runDiagnostics();
+
+  const report = dom.getElementById("diagOut").textContent;
+  assert.ok(report.includes("Ключ: задан"), report);
+  assert.ok(report.includes("API квот: HTTP 200"), report);
+  assert.ok(report.includes("Тариф: max"), report);
+  assert.ok(report.includes("Разбивка по моделям"), report);
 });

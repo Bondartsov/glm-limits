@@ -32,12 +32,20 @@ const GLMQuota = (() => {
     if (!item || typeof item !== "object") return null;
     const used = toNumber(item.percentage);
     const resetMs = toNumber(item.nextResetTime);
+    // usageDetails есть у TIME_LIMIT: расход по инструментам MCP.
+    const details = Array.isArray(item.usageDetails)
+      ? item.usageDetails
+          .filter(d => d && typeof d === "object" && (toNumber(d.usage) || 0) > 0)
+          .map(d => ({ code: String(d.modelCode || "?"), usage: toNumber(d.usage) || 0 }))
+          .sort((a, b) => b.usage - a.usage)
+      : null;
     return {
       utilization: used == null ? 0 : Math.min(Math.max(used, 0), 100),
       resetsAt: resetMs && resetMs > 0 ? new Date(resetMs).toISOString() : null,
       total: toNumber(item.usage),
       spent: toNumber(item.currentValue),
       remaining: toNumber(item.remaining),
+      details: details && details.length ? details : null,
     };
   }
 

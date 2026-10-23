@@ -109,6 +109,7 @@
           <span class="mini-track"><span class="mini-fill" id="mcpBar"></span></span>
           <span class="line-when" id="mcpReset"></span>
         </div>
+        <div class="mcp-details" id="mcpDetails" style="display:none"></div>
       </section>
 
       <!-- Расход по моделям -->
@@ -240,6 +241,11 @@
           <div class="tray-title" data-i18n="trayTitle">Приложение для трея (Windows)</div>
           <div class="tray-text" data-i18n="trayText">Ставится отдельно от расширения: запусти tray_install.bat в папке проекта — он проверит Python, поставит зависимости, создаст конфиг и включит автозапуск.</div>
           <button id="openManual" class="btn-ghost btn-small" data-i18n="trayManual">Открыть инструкцию</button>
+        </div>
+
+        <div class="field">
+          <button id="runDiag" class="btn-ghost btn-small" data-i18n="diagRun">Проверить настройку</button>
+          <pre class="diag" id="diagOut" style="display:none"></pre>
         </div>
 
         <div class="actions-row">

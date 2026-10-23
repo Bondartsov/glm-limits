@@ -776,6 +776,7 @@ class TrayApp:
             win_data = data.get(kind)
             if win_data:
                 self._check_one(cfg, kind, name_key, win_data)
+                self._check_reset(cfg, kind, name_key, win_data)
 
     def _check_one(self, cfg: dict[str, Any], kind: str, name_key: str,
                    win_data: dict[str, Any]) -> None:
@@ -802,6 +803,48 @@ class TrayApp:
                         logger.exception("Не удалось показать уведомление")
                 save_notif_state(self.state.notif)
                 break
+
+    def _check_reset(self, cfg: dict[str, Any], kind: str, name_key: str,
+                     win_data: dict[str, Any]) -> None:
+        """Уведомление о СБРОСЕ окна: старый resetsAt истёк, появился новый."""
+        resets = self.state.notif.setdefault("reset", {})
+        win = win_data.get("resets_at")
+        if not win:
+            return
+        prev = resets.get(kind)
+        if not prev:
+            resets[kind] = {"win": win}
+            save_notif_state(self.state.notif)
+            return
+        if prev.get("win") == win:
+            return
+
+        try:
+            prev_ms = datetime.fromisoformat(prev["win"]).timestamp()
+        except (ValueError, TypeError):
+            prev_ms = 0
+        resets[kind] = {"win": win}
+        save_notif_state(self.state.notif)
+
+        if not (prev_ms and prev_ms <= time.time()):
+            return   # старое окно ещё не истекало
+        if float(win_data.get("used") or 0) >= 50:
+            return   # новое окно уже не свежее — это не сброс
+
+        name = self.tr(name_key)
+        cd = fmt_countdown(win, cfg["lang"])
+        when = fmt_reset_moment(win, cfg["lang"])
+        if cfg["lang"] == "ru":
+            msg = f"{name} сброшена — лимит снова 100%. Следующий сброс через {cd} ({when})."
+            title = f"{APP_NAME} — {self.tr(name_key)} сброшена"
+        else:
+            msg = f"{name} reset — limit is 100% again. Next reset in {cd} ({when})."
+            title = f"{APP_NAME} — {self.tr(name_key)} reset"
+        if self.icon:
+            try:
+                self.icon.notify(msg, title)
+            except Exception:
+                logger.exception("Не удалось показать уведомление о сбросе")
 
     def _notify_text(self, lang: str, name_key: str, used: float,
                      resets_at: str | None) -> str:

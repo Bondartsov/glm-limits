@@ -306,6 +306,7 @@ async function poll() {
     }
     try {
       await maybeNotify(st, fiveHour, sevenDay);
+      await maybeNotifyReset(st, fiveHour, sevenDay);
     } catch (e) {
       console.warn("[GLM Limits] notification failed:", e);
     }
@@ -385,7 +386,7 @@ async function checkNotifyOne(st, kind, win) {
 
 // Момент сброса по-человечески: «3h 52m (сегодня в 16:56)»; для недели
 // дата: «6d 22h (27.10, 12:56)».
-function formatReset(lang, iso) {
+function formatReset(lang, iso, prefixRu, prefixEn) {
   if (!iso) return "";
   const ms = new Date(iso).getTime();
   if (!ms) return "";
@@ -406,7 +407,8 @@ function formatReset(lang, iso) {
   const when = sameDay
     ? (lang === "ru" ? "сегодня в " : "today at ") + time
     : (lang === "ru" ? date + " в " + time : date + ", " + time);
-  return " " + (lang === "ru" ? "Сброс через " : "Resets in ") + cd + " (" + when + ").";
+  const prefix = lang === "ru" ? (prefixRu || "Сброс через") : (prefixEn || "Resets in");
+  return " " + prefix + " " + cd + " (" + when + ").";
 }
 
 function fireNotification(lang, kind, used, threshold, resetsAt) {
@@ -428,6 +430,51 @@ function fireNotification(lang, kind, used, threshold, resetsAt) {
   } catch (e) {}
 }
 
+// Уведомление о СБРОСЕ окна: старый resetsAt истёк, появился новый.
+// Срабатывает один раз на переход окна; первое наблюдение только запоминаем.
+async function maybeNotifyReset(st, fiveHour, sevenDay) {
+  if (!st.notify) return;
+  await checkResetOne(st, "s", fiveHour);
+  await checkResetOne(st, "w", sevenDay);
+}
+
+async function checkResetOne(st, kind, win) {
+  if (!win || !win.resetsAt) return;
+  const now = Date.now();
+  const stg = await chrome.storage.local.get("resetState");
+  const all = (stg.resetState && typeof stg.resetState === "object") ? stg.resetState : {};
+  const prev = all[kind];
+  if (!prev) {
+    all[kind] = { win: win.resetsAt };
+    await chrome.storage.local.set({ resetState: all });
+    return;
+  }
+  if (prev.win === win.resetsAt) return;
+
+  const prevMs = new Date(prev.win).getTime();
+  const expired = prevMs > 0 && prevMs <= now;
+  const fresh = typeof win.utilization === "number" && win.utilization < 50;
+  all[kind] = { win: win.resetsAt };
+  await chrome.storage.local.set({ resetState: all });
+  if (!expired || !fresh) return;   // окно ещё не истекало — не сброс
+
+  const ru = st.lang === "ru";
+  const name = kind === "s" ? (ru ? "Сессия" : "Session") : (ru ? "Неделя" : "Weekly");
+  const next = formatReset(st.lang, win.resetsAt, "Следующий сброс через", "Next reset in");
+  try {
+    chrome.notifications.create({
+      type: "basic",
+      iconUrl: "icons/icon128.png",
+      title: "GLM Limits — " + (kind === "s"
+        ? (ru ? "сессия сброшена" : "session reset")
+        : (ru ? "неделя сброшена" : "weekly reset")),
+      message: ru
+        ? name + " сброшена — лимит снова 100%." + next
+        : name + " reset — limit is 100% again." + next,
+    });
+  } catch (e) {}
+}
+
 // Toolbar badge: percent used of the chosen window, background colored by
 // the same thresholds as the bars (50/75/90). Hex literals — no DOM/CSS vars
 // inside the service worker.
@@ -440,6 +487,7 @@ async function updateBadge(st, fiveHour, sevenDay) {
     const win = st.badgeMetric === "w" ? sevenDay : fiveHour;
     if (!st.badge || !win || typeof win.utilization !== "number") {
       await chrome.action.setBadgeText({ text: "" });
+      try { await chrome.action.setTitle({ title: "GLM Limits" }); } catch (e) {}
       return;
     }
     const used = Math.max(0, Math.min(100, Math.round(win.utilization)));
@@ -450,6 +498,13 @@ async function updateBadge(st, fiveHour, sevenDay) {
     try { await chrome.action.setBadgeTextColor({ color: "#ffffff" }); } catch (e) {}
     // "100" в бейдже Chrome обрезается — показываем "99+".
     await chrome.action.setBadgeText({ text: GLMQuota.badgeText(shown) });
+    // Процент видно и при наведении на иконку — без открытия попапа.
+    const ru = st.lang === "ru";
+    const kind = st.badgeMetric === "w" ? (ru ? "неделя" : "weekly") : (ru ? "сессия" : "session");
+    const word = st.valueMode === "used" ? (ru ? "израсходовано" : "used") : (ru ? "осталось" : "left");
+    try {
+      await chrome.action.setTitle({ title: "GLM Limits — " + kind + ": " + shown + "% " + word });
+    } catch (e) {}
   } catch (e) {}
 }
 

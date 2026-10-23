@@ -193,6 +193,24 @@ class TestNotifications(unittest.TestCase):
         self.assertIn("Осталось 15% лимита", txt)
         self.assertNotIn("Сброс", txt)
 
+
+    def test_reset_notification(self):
+        app = tray.TrayApp()
+        app.icon = FakeIcon()
+        cfg = {"notify": True, "lang": "ru"}
+        past = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        future = (datetime.now(timezone.utc) + timedelta(hours=4)).isoformat()
+
+        # Первое наблюдение — только запоминаем.
+        app.check_notifications(cfg, {"s": {"used": 3, "resets_at": past}})
+        self.assertEqual(len(app.icon.messages), 0, "первое наблюдение не уведомляет")
+
+        # Окно сменилось и оно свежее — это сброс.
+        app.check_notifications(cfg, {"s": {"used": 2, "resets_at": future}})
+        msgs = [m for m in app.icon.messages if "сброшена" in m[1]]
+        self.assertEqual(len(msgs), 1, "должно быть одно уведомление о сбросе")
+        self.assertIn("Следующий сброс через", msgs[0][1])
+
     def test_disabled_notifications(self):
         app = tray.TrayApp()
         app.icon = FakeIcon()
