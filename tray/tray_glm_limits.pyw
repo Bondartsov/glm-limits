@@ -1388,6 +1388,18 @@ def main(argv: list[str]) -> int:
         return 1
     if "--selftest" in argv:
         return selftest()
+    if "--enable-autostart" in argv or "--disable-autostart" in argv:
+        enable = "--enable-autostart" in argv
+        try:
+            set_autostart(enable)
+            msg = "Автозапуск включён" if enable else "Автозапуск выключен"
+            logger.info(msg)
+            print(msg)
+            return 0
+        except Exception as exc:
+            logger.exception("Не удалось изменить автозапуск")
+            print(f"Не удалось изменить автозапуск: {exc}")
+            return 1
 
     cfg = load_config()
     if not cfg["apiKey"] and not CONFIG_PATH.exists():

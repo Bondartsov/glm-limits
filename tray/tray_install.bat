@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 rem ============================================================
 rem  GLM Limits - tray setup + launch (for a new PC)
 rem  Checks Python, installs dependencies, creates the config
@@ -53,9 +53,12 @@ if not errorlevel 1 (
   exit /b 0
 )
 
+echo [GLM Limits] Включаю автозапуск при входе в Windows...
+python tray_glm_limits.pyw --enable-autostart
 echo [GLM Limits] Запускаю трей-иконку (это окно можно закрыть)...
 start "" pythonw tray_glm_limits.pyw
 echo [GLM Limits] Готово. Иконка появится возле часов (возможно, под стрелкой ^^).
 echo [GLM Limits] Не появилась? Запусти tray_debug.bat и посмотри ошибку.
+echo [GLM Limits] Автозапуск можно выключить в меню иконки.
 echo.
 timeout /t 5 >nul
