@@ -59,6 +59,7 @@ echo [GLM Limits] Запускаю трей-иконку (это окно мож
 start "" pythonw tray_glm_limits.pyw
 echo [GLM Limits] Готово. Иконка появится возле часов (возможно, под стрелкой ^^).
 echo [GLM Limits] Не появилась? Запусти tray_debug.bat и посмотри ошибку.
+
 echo [GLM Limits] Автозапуск можно выключить в меню иконки.
 echo.
 timeout /t 5 >nul
