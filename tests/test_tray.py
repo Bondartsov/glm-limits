@@ -221,6 +221,44 @@ class TestStrings(unittest.TestCase):
             self.assertIsInstance(app.tr(key), str)
 
 
+class TestValueMode(unittest.TestCase):
+    """Режим показа чисел в трее: остаток (по умолчанию) или израсходовано."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        tmp = Path(self._tmp.name)
+        self._orig_config = tray.CONFIG_PATH
+        self._orig_state = tray.STATE_PATH
+        tray.CONFIG_PATH = tmp / "tray_config.json"
+        tray.STATE_PATH = tmp / "tray_state.json"
+
+    def tearDown(self):
+        tray.CONFIG_PATH = self._orig_config
+        tray.STATE_PATH = self._orig_state
+        self._tmp.cleanup()
+
+    def test_default_is_remaining(self):
+        self.assertEqual(tray.load_config()["valueMode"], "remaining")
+
+    def test_set_and_read_used(self):
+        self.assertTrue(tray.set_value_mode("used"))
+        self.assertEqual(tray.load_config()["valueMode"], "used")
+        self.assertIn('"valueMode": "used"',
+                      tray.CONFIG_PATH.read_text(encoding="utf-8"))
+
+    def test_display_math(self):
+        app = tray.TrayApp()
+        app.current_cfg["valueMode"] = "remaining"
+        self.assertEqual(app._display(40), 60)   # израсходовано 40 -> осталось 60
+        app.current_cfg["valueMode"] = "used"
+        self.assertEqual(app._display(40), 40)
+
+    def test_strings_for_both_modes(self):
+        for lang in ("ru", "en"):
+            for key in ("value_mode_remaining", "value_mode_used"):
+                self.assertIn(key, tray.STRINGS[lang])
+
+
 @unittest.skipUnless(sys.platform == "win32", "DPAPI доступен только на Windows")
 class TestKeyProtection(unittest.TestCase):
     def setUp(self):

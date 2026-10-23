@@ -92,6 +92,8 @@ STRINGS = {
     "ru": {
         "session": "Сессия (5ч)", "weekly": "Неделя", "mcp": "MCP",
         "left": "осталось", "used": "израсходовано",
+        "value_mode_remaining": "Показывать: остаток",
+        "value_mode_used": "Показывать: израсходовано",
         "no_data": "Нет данных", "error": "Ошибка",
         "reset": "сброс через", "refresh": "Обновить данные",
         "details": "Показать детали", "exit": "Выход",
@@ -122,6 +124,8 @@ STRINGS = {
     "en": {
         "session": "Session (5h)", "weekly": "Weekly", "mcp": "MCP",
         "left": "left", "used": "used",
+        "value_mode_remaining": "Show: remaining",
+        "value_mode_used": "Show: used",
         "no_data": "No data", "error": "Error",
         "reset": "resets in", "refresh": "Refresh data",
         "details": "Show details", "exit": "Exit",
@@ -293,6 +297,19 @@ def enable_dpi_awareness() -> None:
         logger.info("DPI awareness недоступен (старая Windows)")
 
 
+def set_value_mode(mode: str) -> bool:
+    """Сохраняет режим показа чисел в конфиг (ключ остаётся зашифрованным)."""
+    data = _read_config_raw()
+    data["valueMode"] = "used" if mode == "used" else "remaining"
+    try:
+        CONFIG_PATH.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return True
+    except OSError:
+        logger.exception("Не удалось записать режим показа")
+        return False
+
+
 def detect_platform(key: str) -> str:
     """Эвристика платформы — та же, что в background.js расширения."""
     k = (key or "").strip()
@@ -344,6 +361,7 @@ def load_config() -> dict[str, Any]:
         interval = 120
     return {
         "apiKey": api_key,
+        "valueMode": "used" if str(cfg.get("valueMode") or "").lower() == "used" else "remaining",
         "platform": platform if platform in PLATFORMS else "auto",
         "intervalSec": interval,
         "lang": "en" if str(cfg.get("lang") or "ru").lower() == "en" else "ru",
@@ -602,7 +620,8 @@ class TrayApp:
         win = d.get(kind) if d.get("ok") else None
         if not win:
             return f"{label}: —"
-        return f"{label}: {100 - int(win['used'])}% {self.tr('left')}"
+        used = int(win["used"])
+        return f"{label}: {int(round(self._display(used)))}% {self._display_word()}"
 
     def line_session(self, *args: Any) -> str:
         return self._window_line("s")
@@ -640,6 +659,24 @@ class TrayApp:
             parts.append(str(d["plan"]))
         return (APP_NAME + " · " + " · ".join(parts))[:127]
 
+    def _display(self, used: float) -> float:
+        """Число для показа: остаток или израсходовано — по настройке."""
+        return used if self.current_cfg.get("valueMode") == "used" else 100 - used
+
+    def _display_word(self) -> str:
+        return self.tr("used") if self.current_cfg.get("valueMode") == "used" else self.tr("left")
+
+    def on_toggle_value_mode(self, icon: pystray.Icon, item: pystray.MenuItem) -> None:
+        current = self.current_cfg.get("valueMode", "remaining")
+        new_mode = "remaining" if current == "used" else "used"
+        if not set_value_mode(new_mode):
+            self._notify_tray(self.tr("error"))
+            return
+        self.current_cfg["valueMode"] = new_mode
+        logger.info("Режим показа чисел: %s", new_mode)
+        self.refresh_icon()
+        self._notify_tray(self.tr("value_mode_" + new_mode))
+
     def refresh_icon(self) -> None:
         if not self.icon:
             return
@@ -647,7 +684,7 @@ class TrayApp:
         win = d.get("s") or d.get("w") if d.get("ok") else None
         if win:
             used = float(win["used"])
-            self.icon.icon = render_icon(100 - int(used), color_for(used))
+            self.icon.icon = render_icon(int(round(self._display(used))), color_for(used))
         else:
             self.icon.icon = render_icon(None, COLOR_GRAY)
         self.icon.title = self.tooltip()
@@ -1003,6 +1040,9 @@ class TrayApp:
             pystray.Menu.SEPARATOR,
             pystray.MenuItem(lambda item: self.tr("details"), self.open_details, default=True),
             pystray.MenuItem(lambda item: self.tr("refresh"), self.on_refresh),
+            pystray.MenuItem(
+                lambda item: self.tr("value_mode_" + self.current_cfg.get("valueMode", "remaining")),
+                self.on_toggle_value_mode),
             pystray.MenuItem(lambda item: self.tr("upd_ext"), self.update_extension),
             pystray.MenuItem(lambda item: self.tr("key_menu"), self.open_key_dialog),
             pystray.MenuItem(
@@ -1150,13 +1190,14 @@ class TrayApp:
             ring.create_oval(x0, y0, x0 + diameter, y0 + diameter,
                              outline=c["line"], width=thick)
             used = view["used"]
+            shown = self._display(used) if used is not None else None
             if used is None:
                 f_dash = tkfont.Font(family="Segoe UI", weight="bold",
                                      size=min(max(round(diameter / (5.5 * S)), 16), 40))
                 ring.create_text(W / 2, H / 2, text="—", font=f_dash, fill=c["text"])
                 return
             ring.create_arc(x0, y0, x0 + diameter, y0 + diameter, start=90,
-                            extent=-359.9 * (used / 100.0), style="arc",
+                            extent=-359.9 * (shown / 100.0), style="arc",
                             width=thick, outline=color_for_used(used))
 
             # Текст позиционируем по реальным метрикам шрифта, а не по долям
@@ -1177,9 +1218,9 @@ class TrayApp:
             block = h_pct + gap + h_sub
             y_top = (H - block) / 2
             ring.create_text(W / 2, y_top + h_pct / 2,
-                             text=f"{100 - int(used)}%", font=f_pct, fill=c["text"])
+                             text=f"{int(round(shown))}%", font=f_pct, fill=c["text"])
             ring.create_text(W / 2, y_top + h_pct + gap + h_sub / 2,
-                             text=self.tr("left"), font=f_sub, fill=c["muted"])
+                             text=self._display_word(), font=f_sub, fill=c["muted"])
 
         ring.bind("<Configure>", lambda event: draw_ring())
 
@@ -1290,7 +1331,8 @@ class TrayApp:
                 win_data = d.get(source) if ok else None
                 if win_data:
                     used_w = float(win_data["used"])
-                    rows[key].config(text=f"{100 - int(used_w)}%", fg=color_for_used(used_w))
+                    rows[key].config(text=f"{int(round(self._display(used_w)))}%",
+                                     fg=color_for_used(used_w))
                 else:
                     rows[key].config(text="—", fg=c["muted"])
 
