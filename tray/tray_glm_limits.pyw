@@ -1079,6 +1079,7 @@ class TrayApp:
 
     def _details_main(self) -> None:
         import tkinter as tk
+        import tkinter.font as tkfont
 
         c = {"bg": "#17191C", "card": "#1F2124", "text": "#ECEEF1",
              "muted": "#8B9098", "line": "#24272B", "accent": "#6E9BC4",
@@ -1089,14 +1090,19 @@ class TrayApp:
 
         win = tk.Toplevel(self._root)
         win.title(APP_NAME)
-        win.geometry("340x430")
-        win.minsize(320, 400)
-        win.attributes("-topmost", True)
         win.configure(bg=c["bg"])
         win.columnconfigure(0, weight=1)
         self._detail_win = win
 
-        # Состояние для перерисовки при изменении размера окна.
+        # Масштаб DPI: 1.0 при 100%, 1.25 / 1.5 при масштабировании Windows.
+        try:
+            S = win.winfo_fpixels("1i") / 96.0
+        except Exception:
+            S = 1.0
+
+        def px(value: float) -> int:
+            return max(1, round(value * S))
+
         view = {"used": None, "week": None, "mcp": None, "ts": None, "host": ""}
 
         def on_close() -> None:
@@ -1104,22 +1110,6 @@ class TrayApp:
             win.destroy()
 
         win.protocol("WM_DELETE_WINDOW", on_close)
-
-        # ── Шапка ──
-        head = tk.Frame(win, bg=c["bg"])
-        head.grid(row=0, column=0, sticky="ew", padx=16, pady=(12, 0))
-        tk.Label(head, text=APP_NAME, font=("Segoe UI", 12, "bold"),
-                 fg=c["text"], bg=c["bg"]).pack(side="left")
-        tk.Label(head, text=f"v{ext_version}", font=("Segoe UI", 9),
-                 fg=c["muted"], bg=c["bg"]).pack(side="right")
-        tk.Label(win, text=f"{self.tr('updated_at')}: {upd_time}" if upd_time else "",
-                 font=("Segoe UI", 9), fg=c["muted"], bg=c["bg"],
-                 anchor="w").grid(row=1, column=0, sticky="ew", padx=16, pady=(1, 0))
-
-        # ── Кольцо (растягивается, шрифт масштабируется) ──
-        ring = tk.Canvas(win, bg=c["bg"], width=220, height=150, highlightthickness=0)
-        ring.grid(row=2, column=0, sticky="nsew", padx=16, pady=(8, 0))
-        win.rowconfigure(2, weight=1)   # забирает всё лишнее место
 
         def color_for_used(used: float) -> str:
             if used < 50:
@@ -1130,72 +1120,127 @@ class TrayApp:
                 return c["hot"]
             return c["risk"]
 
+        # ── Шапка ──
+        head = tk.Frame(win, bg=c["bg"])
+        head.grid(row=0, column=0, sticky="ew", padx=px(16), pady=(px(12), 0))
+        tk.Label(head, text=APP_NAME, font=("Segoe UI", 12, "bold"),
+                 fg=c["text"], bg=c["bg"]).pack(side="left")
+        tk.Label(head, text=f"v{ext_version}", font=("Segoe UI", 9),
+                 fg=c["muted"], bg=c["bg"]).pack(side="right")
+        tk.Label(win, text=f"{self.tr('updated_at')}: {upd_time}" if upd_time else "",
+                 font=("Segoe UI", 9), fg=c["muted"], bg=c["bg"], anchor="w").grid(
+            row=1, column=0, sticky="ew", padx=px(16), pady=(px(2), 0))
+
+        # ── Кольцо ──
+        ring = tk.Canvas(win, bg=c["bg"], width=px(220), height=px(150),
+                         highlightthickness=0)
+        ring.grid(row=2, column=0, sticky="nsew", padx=px(16), pady=(px(8), 0))
+        win.rowconfigure(2, weight=1)
+
         def draw_ring() -> None:
             ring.delete("all")
-            w = max(ring.winfo_width(), 120)
-            h = max(ring.winfo_height(), 110)
-            size = min(w, h) - 12
-            x0 = (w - size) / 2
-            y0 = (h - size) / 2
-            thick = max(6, int(size / 14))
-            ring.create_oval(x0, y0, x0 + size, y0 + size, outline=c["line"], width=thick)
+            W = max(ring.winfo_width(), 1)
+            H = max(ring.winfo_height(), 1)
+            margin = px(10)
+            diameter = min(min(W, H) - 2 * margin, px(220))
+            diameter = max(diameter, px(70))
+            thick = min(max(round(diameter / 10), px(8)), px(16))
+            x0 = (W - diameter) / 2
+            y0 = (H - diameter) / 2
+            ring.create_oval(x0, y0, x0 + diameter, y0 + diameter,
+                             outline=c["line"], width=thick)
             used = view["used"]
             if used is None:
-                ring.create_text(w / 2, h / 2, text="—",
-                                 font=("Segoe UI", max(14, int(size / 5)), "bold"),
-                                 fill=c["text"])
+                f_dash = tkfont.Font(family="Segoe UI", weight="bold",
+                                     size=min(max(round(diameter / (5.5 * S)), 16), 40))
+                ring.create_text(W / 2, H / 2, text="—", font=f_dash, fill=c["text"])
                 return
-            ring.create_arc(x0, y0, x0 + size, y0 + size, start=90,
+            ring.create_arc(x0, y0, x0 + diameter, y0 + diameter, start=90,
                             extent=-359.9 * (used / 100.0), style="arc",
                             width=thick, outline=color_for_used(used))
-            ring.create_text(w / 2, h / 2 - size * 0.02, text=f"{100 - int(used)}%",
-                             font=("Segoe UI", max(16, int(size / 5)), "bold"),
-                             fill=c["text"])
-            ring.create_text(w / 2, h / 2 + size * 0.16, text=self.tr("left"),
-                             font=("Segoe UI", max(8, int(size / 16))), fill=c["muted"])
+
+            # Текст позиционируем по реальным метрикам шрифта, а не по долям
+            # диаметра — иначе процент и подпись слипаются.
+            pct_pt = min(max(round(diameter / (5.5 * S)), 16), 40)
+            sub_pt = min(max(round(diameter / (16 * S)), 9), 14)
+            f_pct = tkfont.Font(family="Segoe UI", size=pct_pt, weight="bold")
+            f_sub = tkfont.Font(family="Segoe UI", size=sub_pt)
+            h_pct = f_pct.metrics("linespace")
+            h_sub = f_sub.metrics("linespace")
+            gap = max(px(4), round(h_pct * 0.10))
+            inner = diameter - thick
+            # Если пара не влезает внутрь кольца — уменьшаем процент.
+            while h_pct + gap + h_sub > inner - px(8) and pct_pt > 16:
+                pct_pt -= 1
+                f_pct = tkfont.Font(family="Segoe UI", size=pct_pt, weight="bold")
+                h_pct = f_pct.metrics("linespace")
+            block = h_pct + gap + h_sub
+            y_top = (H - block) / 2
+            ring.create_text(W / 2, y_top + h_pct / 2,
+                             text=f"{100 - int(used)}%", font=f_pct, fill=c["text"])
+            ring.create_text(W / 2, y_top + h_pct + gap + h_sub / 2,
+                             text=self.tr("left"), font=f_sub, fill=c["muted"])
 
         ring.bind("<Configure>", lambda event: draw_ring())
 
-        # ── Подпись под кольцом ──
+        # ── Подпись ──
         cap = tk.Label(win, text="", font=("Segoe UI", 10), fg=c["muted"], bg=c["bg"])
-        cap.grid(row=3, column=0, sticky="ew", padx=16, pady=(4, 0))
+        cap.grid(row=3, column=0, sticky="ew", padx=px(16), pady=(px(6), 0))
 
-        # ── Мини-график (растягивается по ширине) ──
-        chart = tk.Canvas(win, bg=c["bg"], width=220, height=40, highlightthickness=0)
-        chart.grid(row=4, column=0, sticky="ew", padx=16, pady=(8, 0))
+        # ── Мини-график: высота считается из метрик шрифта подписей ──
+        f_lbl = tkfont.Font(family="Segoe UI", size=8)
+        h_lbl = f_lbl.metrics("linespace")
+        top_pad = px(6)
+        bar_max = px(34)
+        lbl_gap = px(3)
+        chart_h = top_pad + bar_max + lbl_gap + h_lbl + px(2)
+
+        chart = tk.Canvas(win, bg=c["bg"], width=px(220), height=chart_h,
+                          highlightthickness=0)
+        chart.grid(row=4, column=0, sticky="ew", padx=px(16), pady=(px(8), 0))
 
         def draw_chart() -> None:
             chart.delete("all")
-            w = max(chart.winfo_width(), 200)
-            hgt = max(chart.winfo_height(), 30)
+            W = max(chart.winfo_width(), 1)
+            base = top_pad + bar_max
+            y_lbl = base + lbl_gap
             buckets = self._hourly_buckets()
             now = datetime.now()
             hours = [(now.hour - 3 + i) % 24 for i in range(6)]
             values = [buckets.get(hour, 0.0) for hour in hours]
             peak = max(values) if values else 0.0
-            slot = w / 6
-            base = hgt - 11
+            slot = W / 6
+            bar_w = min(max(round(slot * 0.6), px(8)), px(48))
+            # Если подписи не помещаются — рисуем через одну (текущий час всегда).
+            show_labels = slot >= 2.4 * max(1, f_lbl.measure("00"))
             for i, (hour, value) in enumerate(zip(hours, values)):
-                x = i * slot + max(3, slot * 0.12)
-                bw = max(4, slot * 0.76)
-                bh = max(2, (value / peak) * (base - 4)) if peak > 0 and value > 0 else 2
-                color = c["accent"] if i == 3 else (c["ok"] if value > 0 else c["line"])
-                chart.create_rectangle(x, base - bh, x + bw, base, fill=color, outline="")
-                chart.create_text(x + bw / 2, hgt - 4, text=f"{hour:02d}",
-                                  fill=c["accent"] if i == 3 else c["muted"],
-                                  font=("Segoe UI", 8))
+                center = i * slot + slot / 2
+                x = center - bar_w / 2
+                if peak > 0 and value > 0:
+                    draw_h = max(round(value / peak * bar_max), px(2))
+                    color = c["accent"] if i == 3 else c["ok"]
+                else:
+                    draw_h = px(2)
+                    color = c["line"]
+                chart.create_rectangle(round(x), base - draw_h, round(x + bar_w), base,
+                                       fill=color, outline="")
+                if show_labels or i == 3:
+                    chart.create_text(round(center), y_lbl, text=f"{hour:02d}",
+                                      anchor="n", font=f_lbl,
+                                      fill=c["accent"] if i == 3 else c["muted"])
             # Отметка «сейчас» — на полке над столбцами.
-            cx = 3 * slot + slot / 2
-            chart.create_line(cx, 0, cx, 5, fill=c["text"], width=2)
+            chart.create_line(round(3 * slot + slot / 2), 0,
+                              round(3 * slot + slot / 2), top_pad,
+                              fill=c["text"], width=2)
 
         chart.bind("<Configure>", lambda event: draw_chart())
 
-        # ── Строки «Неделя» и «MCP» ──
+        # ── Строки метрик ──
         rows: dict[str, tk.Label] = {}
 
         def make_row(row: int, key: str, title: str) -> None:
             wrap = tk.Frame(win, bg=c["bg"])
-            wrap.grid(row=row, column=0, sticky="ew", padx=16)
+            wrap.grid(row=row, column=0, sticky="ew", padx=px(16), pady=(px(2), 0))
             tk.Label(wrap, text=title, font=("Segoe UI", 10), fg=c["muted"],
                      bg=c["bg"]).pack(side="left")
             val = tk.Label(wrap, text="—", font=("Segoe UI", 12, "bold"), fg=c["text"],
@@ -1204,16 +1249,17 @@ class TrayApp:
             rows[key] = val
 
         tk.Frame(win, height=1, bg=c["line"]).grid(row=5, column=0, sticky="ew",
-                                                   padx=16, pady=(10, 3))
+                                                   padx=px(16), pady=(px(12), px(4)))
         make_row(6, "w", self.tr("weekly"))
         make_row(7, "mcp", self.tr("mcp"))
 
-        # ── Подвал (прижат к низу за счёт растянутого кольца) ──
+        # ── Подвал ──
         foot = tk.Frame(win, bg=c["bg"])
-        foot.grid(row=8, column=0, sticky="ew", padx=16, pady=(10, 12))
-        tk.Button(foot, text="⟳", command=self.wake.set, bg=c["card"], fg=c["text"],
-                  activebackground=c["line"], activeforeground=c["text"], relief="flat",
-                  width=3, cursor="hand2").pack(side="right")
+        foot.grid(row=8, column=0, sticky="ew", padx=px(16), pady=(px(12), px(12)))
+        tk.Button(foot, text="⟳", command=self.wake.set, font=("Segoe UI", 10),
+                  bg=c["card"], fg=c["text"], activebackground=c["line"],
+                  activeforeground=c["text"], relief="flat",
+                  padx=px(10), pady=px(4), cursor="hand2").pack(side="right")
         foot_lbl = tk.Label(foot, text="", font=("Segoe UI", 9), fg=c["muted"],
                             bg=c["bg"], anchor="w")
         foot_lbl.pack(side="left", fill="x", expand=True)
@@ -1251,14 +1297,13 @@ class TrayApp:
             draw_chart()
             ts = d.get("ts")
             host = HOSTS.get(d.get("platform"), "").replace("https://", "").replace("http://", "")
-            foot_lbl.config(text=(f"{time.strftime('%H:%M', time.localtime(ts))} · {host}"
-                                  if ts else "")[:42])
+            label = f"{time.strftime('%H:%M', time.localtime(ts))} · {host}" if ts else ""
+            foot_lbl.config(text=label[:48])
             win.after(1000, tick)
 
         win.update_idletasks()
-        fit_w = max(340, win.winfo_reqwidth())
-        fit_h = max(400, win.winfo_reqheight())
-        win.geometry(f"{fit_w}x{fit_h}")
+        win.geometry(f"{max(px(340), win.winfo_reqwidth())}x{max(px(430), win.winfo_reqheight())}")
+        win.minsize(px(320), px(400))
 
         tick()
         win.after(60, draw_ring)
