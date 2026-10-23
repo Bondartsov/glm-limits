@@ -192,3 +192,23 @@ test("hourlyActivity: сброс окна не считается активно
   assert.equal(buckets[14].value, 0, "откат (сброс) не должен попадать в активность");
   assert.equal(buckets[14].has, false);
 });
+
+test("parseModelUsage: доли по моделям, нулевые отбрасываются", () => {
+  const data = {
+    x_time: ["2026-10-22 00:00", "2026-10-22 01:00"],
+    modelDataList: [
+      { modelName: "GLM-5.3", totalTokens: 431887322 },
+      { modelName: "GLM-5.3-Flash", totalTokens: 355528176 },
+      { modelName: "Zero", totalTokens: 0 },
+    ],
+    totalUsage: { totalModelCallCount: 4305, totalTokensUsage: 787415498 },
+  };
+  const r = GLMQuota.parseModelUsage(data);
+  assert.equal(r.models.length, 2, "модель с нулём отбрасывается");
+  assert.equal(r.models[0].name, "GLM-5.3", "сортировка по убыванию токенов");
+  assert.equal(r.total, 787415498);
+  assert.ok(Math.abs(r.models[0].share - 431887322 / 787415498) < 1e-9);
+  assert.equal(r.calls, 4305);
+  assert.equal(GLMQuota.parseModelUsage(null), null);
+  assert.equal(GLMQuota.parseModelUsage({}), null);
+});

@@ -294,3 +294,15 @@ body {
 .tray-title { font-size: 12px; font-weight: 600; margin-bottom: 4px; }
 .tray-text { font-size: 11px; color: var(--muted); line-height: 1.45; margin-bottom: 8px; }
 .btn-small { padding: 6px 12px; font-size: 12px; }
+
+/* Расход по моделям */
+.share-bar {
+  display: flex; height: 8px; border-radius: 4px; overflow: hidden;
+  background: var(--track); margin-top: 10px;
+}
+.share-seg { display: block; height: 100%; }
+.model-rows { margin-top: 9px; display: flex; flex-direction: column; gap: 5px; }
+.model-row { display: flex; align-items: center; gap: 7px; font-size: 12px; }
+.model-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.model-name { color: var(--text); }
+.model-val { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }

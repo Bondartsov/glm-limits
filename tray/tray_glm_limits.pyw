@@ -39,6 +39,7 @@ import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 APP_NAME = "GLM Limits"
 HOSTS = {"cn": "https://open.bigmodel.cn", "intl": "https://api.z.ai"}
@@ -308,6 +309,31 @@ def set_value_mode(mode: str) -> bool:
     except OSError:
         logger.exception("Не удалось записать режим показа")
         return False
+
+
+def parse_model_usage(data: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Разбор ответа /api/monitor/usage/model-usage: доли по моделям."""
+    if not isinstance(data, dict):
+        return None
+    models: list[dict[str, Any]] = []
+    total = 0
+    for item in data.get("modelDataList") or []:
+        if not isinstance(item, dict):
+            continue
+        try:
+            tokens = int(item.get("totalTokens") or 0)
+        except (TypeError, ValueError):
+            continue
+        if tokens <= 0:
+            continue
+        models.append({"name": str(item.get("modelName") or "?"), "tokens": tokens})
+        total += tokens
+    if not models:
+        return None
+    models.sort(key=lambda m: -m["tokens"])
+    for m in models:
+        m["share"] = (m["tokens"] / total) if total else 0.0
+    return {"models": models, "total": total}
 
 
 def detect_platform(key: str) -> str:
@@ -623,6 +649,7 @@ class TrayApp:
         self._key_win: Any = None
         self._remote_version: str | None = None
         self._history: list[tuple[float, float]] = []   # (ts, израсходовано %)
+        self._model_usage: dict[str, Any] | None = None
         self._ui_queue: queue.Queue = queue.Queue()     # действия в потоке Tk
         self._root: Any = None
         self.current_cfg: dict[str, Any] = load_config()
@@ -887,6 +914,37 @@ class TrayApp:
                 logger.error("После обновления отсутствует файл %s", f)
                 return False
         return True
+
+    def _start_model_watch(self) -> None:
+        threading.Thread(target=self._model_worker, name="models", daemon=True).start()
+
+    def _model_worker(self) -> None:
+        """Разбивка по моделям меняется медленно — обновляем раз в 15 минут."""
+        while not self.stop_evt.is_set():
+            try:
+                cfg = load_config()
+                if cfg["apiKey"]:
+                    self._model_usage = self._fetch_model_usage(cfg)
+            except Exception:
+                logger.exception("Не удалось получить расход по моделям")
+            self.stop_evt.wait(900)
+
+    @staticmethod
+    def _fetch_model_usage(cfg: dict[str, Any]) -> dict[str, Any] | None:
+        platform = cfg["platform"]
+        if platform == "auto":
+            platform = detect_platform(cfg["apiKey"])
+        host = HOSTS.get(platform, HOSTS["cn"])
+        today = datetime.now().strftime("%Y-%m-%d")
+        url = (host + "/api/monitor/usage/model-usage"
+               + "?startTime=" + quote(today + " 00:00:00")
+               + "&endTime=" + quote(today + " 23:59:59"))
+        resp = requests.get(url, headers={"Authorization": cfg["apiKey"],
+                                          "Accept": "application/json"}, timeout=15)
+        if resp.status_code != 200:
+            logger.warning("model-usage: HTTP %s", resp.status_code)
+            return None
+        return parse_model_usage((resp.json() or {}).get("data"))
 
     def _start_update_watch(self) -> None:
         """Фоновый следящий: проверяет origin/main и держит метку
@@ -1336,9 +1394,13 @@ class TrayApp:
         make_row(6, "w", self.tr("weekly"))
         make_row(7, "mcp", self.tr("mcp"))
 
+        models_lbl = tk.Label(win, text="", font=("Segoe UI", 9), fg=c["muted"],
+                              bg=c["bg"], anchor="w")
+        models_lbl.grid(row=8, column=0, sticky="ew", padx=px(16), pady=(px(6), 0))
+
         # ── Подвал ──
         foot = tk.Frame(win, bg=c["bg"])
-        foot.grid(row=8, column=0, sticky="ew", padx=px(16), pady=(px(12), px(12)))
+        foot.grid(row=9, column=0, sticky="ew", padx=px(16), pady=(px(10), px(12)))
         tk.Button(foot, text="⟳", command=self.wake.set, font=("Segoe UI", 10),
                   bg=c["card"], fg=c["text"], activebackground=c["line"],
                   activeforeground=c["text"], relief="flat",
@@ -1379,6 +1441,14 @@ class TrayApp:
                     rows[key].config(text="—", fg=c["muted"])
 
             draw_chart()
+            mu = self._model_usage
+            if mu and mu.get("models"):
+                parts = [f"{m['name']} {round(m['share'] * 100)}%"
+                         for m in mu["models"][:3]]
+                models_lbl.config(text="Модели: " + " · ".join(parts)
+                                  if lang == "ru" else "Models: " + " · ".join(parts))
+            else:
+                models_lbl.config(text="")
             ts = d.get("ts")
             host = HOSTS.get(d.get("platform"), "").replace("https://", "").replace("http://", "")
             label = f"{time.strftime('%H:%M', time.localtime(ts))} · {host}" if ts else ""
@@ -1422,6 +1492,7 @@ class TrayApp:
             )
             logger.info("Трей-иконка запущена")
             self._start_update_watch()
+            self._start_model_watch()
             self.icon.run()
         except Exception:
             logger.exception("Трей-иконка завершилась с ошибкой")

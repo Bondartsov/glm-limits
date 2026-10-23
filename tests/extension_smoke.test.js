@@ -129,6 +129,7 @@ const POPUP_IDS = [
   "metricWeekly", "weeklyPct", "weeklyAnno", "weeklyBar", "weeklyReset", "weeklyChart",
   "weeklyLegend",
   "metricMcp", "mcpPct", "mcpAnno", "mcpBar", "mcpReset",
+  "metricModels", "modelsAnno", "modelsBar", "modelsRows",
   "planBadge", "compactView", "chipSession", "chipSessionPct", "chipWeekly", "chipWeeklyPct",
   "footer", "footReset", "footSource",
   "settingsPanel", "closeSettings", "apiKeyInput", "keyState", "keyPersistCheck",

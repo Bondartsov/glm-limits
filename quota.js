@@ -233,11 +233,37 @@ const GLMQuota = (() => {
     return { bars, span, before, nowHourMs };
   }
 
+
+  // Разбор ответа /api/monitor/usage/model-usage:
+  // data.modelDataList = [{modelName, tokensUsage[], totalTokens}]
+  function parseModelUsage(data) {
+    if (!data || typeof data !== "object") return null;
+    const list = Array.isArray(data.modelDataList) ? data.modelDataList : [];
+    const models = [];
+    let total = 0;
+    for (const item of list) {
+      if (!item || typeof item !== "object") continue;
+      const tokens = toNumber(item.totalTokens) || 0;
+      if (tokens <= 0) continue;
+      models.push({ name: String(item.modelName || "?"), tokens });
+      total += tokens;
+    }
+    if (!models.length) return null;
+    models.sort((a, b) => b.tokens - a.tokens);
+    for (const m of models) m.share = total > 0 ? m.tokens / total : 0;
+    return {
+      models,
+      total,
+      hours: Array.isArray(data.x_time) ? data.x_time.length : 0,
+      calls: toNumber((data.totalUsage || {}).totalModelCallCount),
+    };
+  }
+
   const api = {
     TOKEN_TYPES, MONTHLY_TYPE, NOTIFY_THRESHOLDS, BADGE_COLORS,
     toNumber, normalizeWindow, parseLimits, detectPlatform,
     badgeColor, badgeText, notifyDecision, formatAmount,
-    hourlyActivity, dailyActivity, activityWindow,
+    hourlyActivity, dailyActivity, activityWindow, parseModelUsage,
   };
 
   if (typeof globalThis !== "undefined") globalThis.GLMQuota = api;

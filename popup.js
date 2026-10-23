@@ -45,6 +45,8 @@ const I18N = {
     plan: "Plan",
     utilSpent: "used", utilLeft: "left",
     sessionLeft: "Left · session (5h)", weeklyLeft: "Left · weekly", mcpLeft: "Left · MCP",
+    modelsTitle: "Usage by model",
+    modelsHint: "tokens today",
     chartHours: "activity by hour",
     chartDays: "spend by day of week",
     legendNow: "now",
@@ -96,6 +98,8 @@ const I18N = {
     plan: "Тариф",
     utilSpent: "израсходовано", utilLeft: "осталось",
     sessionLeft: "Осталось · сессия (5ч)", weeklyLeft: "Осталось · неделя", mcpLeft: "Осталось · MCP",
+    modelsTitle: "Расход по моделям",
+    modelsHint: "токены за сегодня",
     chartHours: "активность по часам",
     chartDays: "расход по дням недели",
     legendNow: "сейчас",
@@ -116,6 +120,7 @@ let historyData = [];
 let lastUpdateInfo = null;      // кэш lastUpdate — читаем из storage не каждый кадр
 let updateAvailableInfo = null; // метка «доступна новая версия» (постоянная)
 let lastChartHour = null;       // час, для которого нарисована скользящая шкала
+let modelUsageData = null;      // расход по моделям (токены за сегодня)
 
 // ── Helpers ──────────────────────────────────────────────
 function t(key) {
@@ -159,14 +164,20 @@ function fmtCountdown(epochMs) {
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);
   const sec = s % 60;
+  const ru = currentLang === "ru";
   if (h > 24) {
     const d = Math.floor(h / 24);
-    return d + "d " + (h % 24) + "h";
+    return d + (ru ? "д " : "d ") + (h % 24) + (ru ? "ч" : "h");
   }
-  if (h > 0) return h + "h " + m + "m";
-  if (m > 0) return m + "m " + sec + "s";
-  return sec + "s";
+  if (h > 0) return h + (ru ? "ч " : "h ") + m + (ru ? "м" : "m");
+  if (m > 0) return m + (ru ? "м " : "m ") + sec + (ru ? "с" : "s");
+  return sec + (ru ? "с" : "s");
 }
+
+// Единый формат: ДД.ММ.ГГГГ и ЧЧ:ММ — независимо от локали браузера.
+function pad2(n) { return String(n).padStart(2, "0"); }
+function fmtDate(d) { return pad2(d.getDate()) + "." + pad2(d.getMonth() + 1) + "." + d.getFullYear(); }
+function fmtTime(d) { return pad2(d.getHours()) + ":" + pad2(d.getMinutes()); }
 
 function fmtAt(epochMs) {
   if (!epochMs) return "—";
@@ -175,11 +186,10 @@ function fmtAt(epochMs) {
   const today = new Date(now.toDateString());
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
-  const timeStr = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const timeStr = fmtTime(d);
   if (d.toDateString() === today.toDateString()) return t("today").replace("HH:MM", timeStr);
   if (d.toDateString() === tomorrow.toDateString()) return t("tomorrow").replace("HH:MM", timeStr);
-  const dayName = d.toLocaleDateString([], { weekday: "short" });
-  return dayName + " " + timeStr;
+  return fmtDate(d) + " " + timeStr;
 }
 
 // ── Данные ────────────────────────────────────────────────
@@ -370,6 +380,96 @@ function updateChartLegends() {
   renderLegend($("weeklyLegend"), items);
 }
 
+
+// ── Расход по моделям ─────────────────────────────────────
+// Отдельный запрос к /api/monitor/usage/model-usage (разбивка по моделям),
+// кэшируется на 10 минут: чаще нет смысла, данные дневные.
+const MODEL_USAGE_TTL_MS = 10 * 60 * 1000;
+
+async function loadModelUsage(force) {
+  const now = Date.now();
+  try {
+    const cached = await chrome.storage.local.get("modelUsage");
+    const mu = cached.modelUsage;
+    if (!force && mu && now - (mu.ts || 0) < MODEL_USAGE_TTL_MS) {
+      modelUsageData = mu;
+      return;
+    }
+  } catch (e) { /* кэш недоступен — просто запросим */ }
+
+  const key = await GLMKeyring.getApiKey();
+  if (!key) { modelUsageData = null; return; }
+  const stored = await chrome.storage.local.get("platform");
+  const platform = normalizePlatform(stored.platform);
+  const resolved = platform === "auto"
+    ? (GLMQuota.detectPlatform(key) === "intl" ? "https://api.z.ai" : "https://open.bigmodel.cn")
+    : (platform === "intl" ? "https://api.z.ai" : "https://open.bigmodel.cn");
+
+  const d = new Date();
+  const day = fmtDateIso(d);
+  const url = resolved + "/api/monitor/usage/model-usage"
+    + "?startTime=" + encodeURIComponent(day + " 00:00:00")
+    + "&endTime=" + encodeURIComponent(day + " 23:59:59");
+  try {
+    const r = await fetch(url, {
+      headers: { "Authorization": key, "Accept": "application/json" },
+    });
+    if (!r.ok) return;
+    const body = await r.json();
+    const parsed = GLMQuota.parseModelUsage(body && body.data);
+    if (!parsed) { modelUsageData = null; return; }
+    const rec = { ts: now, models: parsed.models, total: parsed.total };
+    modelUsageData = rec;
+    await chrome.storage.local.set({ modelUsage: rec });
+  } catch (e) {
+    // Сеть/таймаут — оставляем прошлые данные, не ломаем попап.
+  }
+}
+
+// API ждёт yyyy-MM-dd (не путать с отображаемым ДД.ММ.ГГГГ).
+function fmtDateIso(d) {
+  return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
+}
+
+function renderModels(mu) {
+  const el = $("metricModels");
+  if (!el) return;
+  if (!mu || !mu.models || !mu.models.length) { el.style.display = "none"; return; }
+  el.style.display = "";
+  const colors = ["var(--accent)", "var(--ok)", "var(--warn)", "var(--hot)", "var(--risk)"];
+
+  const bar = $("modelsBar");
+  while (bar.firstChild) bar.removeChild(bar.firstChild);
+  mu.models.forEach((m, i) => {
+    const seg = document.createElement("span");
+    seg.className = "share-seg";
+    seg.style.width = (m.share * 100).toFixed(1) + "%";
+    seg.style.background = colors[i % colors.length];
+    bar.appendChild(seg);
+  });
+
+  const rows = $("modelsRows");
+  while (rows.firstChild) rows.removeChild(rows.firstChild);
+  mu.models.forEach((m, i) => {
+    const row = document.createElement("div");
+    row.className = "model-row";
+    const dot = document.createElement("i");
+    dot.className = "model-dot";
+    dot.style.background = colors[i % colors.length];
+    const name = document.createElement("span");
+    name.className = "model-name";
+    name.textContent = m.name;
+    const val = document.createElement("span");
+    val.className = "model-val";
+    val.textContent = GLMQuota.formatAmount(m.tokens, currentLang) +
+      " · " + Math.round(m.share * 100) + "%";
+    row.appendChild(dot);
+    row.appendChild(name);
+    row.appendChild(val);
+    rows.appendChild(row);
+  });
+  $("modelsAnno").textContent = GLMQuota.formatAmount(mu.total, currentLang);
+}
 // ── Рендеринг ─────────────────────────────────────────────
 function setStatus(kind, text, extra) {
   const dot = document.querySelector("#status .dot");
@@ -468,8 +568,7 @@ function renderFooter(data) {
   if (lastUpdateInfo && lastUpdateInfo.at) {
     const d = new Date(lastUpdateInfo.at);
     parts.push((currentLang === "ru" ? "обновлено " : "updated ") +
-      d.toLocaleDateString() + " " +
-      d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+      fmtDate(d) + " " + fmtTime(d));
   }
   $("footSource").textContent = parts.join(" · ");
 }
@@ -480,6 +579,7 @@ function showEmptyState() {
   $("metricSession").style.display = "none";
   $("metricWeekly").style.display = "none";
   $("metricMcp").style.display = "none";
+  $("metricModels").style.display = "none";
   $("planBadge").style.display = "none";
   $("footer").style.display = "none";
   setStatus("offline", t("statusNoKey"));
@@ -502,6 +602,7 @@ function render(data) {
     $("metricSession").style.display = "none";
     $("metricWeekly").style.display = "none";
     $("metricMcp").style.display = "none";
+    $("metricModels").style.display = "none";
     $("planBadge").style.display = "none";
     $("footer").style.display = "none";
     return;
@@ -518,6 +619,7 @@ function render(data) {
     $("metricSession").style.display = "none";
     $("metricWeekly").style.display = "none";
     $("metricMcp").style.display = "none";
+    $("metricModels").style.display = "none";
     $("planBadge").style.display = "none";
     $("compactView").style.display = "";
     showChip("chipSession", "chipSessionPct", data.s);
@@ -555,6 +657,7 @@ function render(data) {
     { barH: 18, nowIndex: wWin.nowIndex, resets: wWin.resets });
 
   updateChartLegends();
+  renderModels(modelUsageData);
 
   renderFooter(data);
 }
@@ -699,6 +802,7 @@ async function poll() {
     await loadHistory();
     await loadLastUpdate();
     await loadUpdateInfo();
+    await loadModelUsage(false);
     render(r && r.ok ? r : (r && r.noKey ? r : { ok: false }));
   } catch (e) {
     await loadHistory();

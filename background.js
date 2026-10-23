@@ -392,12 +392,16 @@ function formatReset(lang, iso) {
   const diff = Math.max(0, ms - Date.now());
   const h = Math.floor(diff / 3600e3);
   const m = Math.floor((diff % 3600e3) / 60e3);
+  const ru = lang === "ru";
   const cd = h >= 24
-    ? (Math.floor(h / 24) + "d " + (h % 24) + "h")
-    : (h > 0 ? (h + "h " + m + "m") : (m + "m"));
+    ? (Math.floor(h / 24) + (ru ? "д " : "d ") + (h % 24) + (ru ? "ч" : "h"))
+    : (h > 0 ? (h + (ru ? "ч " : "h ") + m + (ru ? "м" : "m"))
+             : (m + (ru ? "м" : "m")));
   const d = new Date(ms);
-  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  const date = d.toLocaleDateString([], { day: "2-digit", month: "2-digit" });
+  const p2 = (n) => String(n).padStart(2, "0");
+  const time = p2(d.getHours()) + ":" + p2(d.getMinutes());
+  // Дата всегда ДД.ММ.ГГГГ — независимо от локали браузера.
+  const date = p2(d.getDate()) + "." + p2(d.getMonth() + 1) + "." + d.getFullYear();
   const sameDay = d.toDateString() === new Date().toDateString();
   const when = sameDay
     ? (lang === "ru" ? "сегодня в " : "today at ") + time

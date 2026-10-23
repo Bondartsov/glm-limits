@@ -282,6 +282,27 @@ class TestValueMode(unittest.TestCase):
                 self.assertIn(key, tray.STRINGS[lang])
 
 
+
+class TestModelUsage(unittest.TestCase):
+    def test_parse_shares(self):
+        data = {"modelDataList": [
+            {"modelName": "GLM-5.3", "totalTokens": 300},
+            {"modelName": "Flash", "totalTokens": 100},
+            {"modelName": "Zero", "totalTokens": 0},
+        ]}
+        r = tray.parse_model_usage(data)
+        self.assertEqual(len(r["models"]), 2)
+        self.assertEqual(r["models"][0]["name"], "GLM-5.3")
+        self.assertEqual(r["total"], 400)
+        self.assertAlmostEqual(r["models"][0]["share"], 0.75)
+        self.assertAlmostEqual(r["models"][1]["share"], 0.25)
+
+    def test_bad_input(self):
+        self.assertIsNone(tray.parse_model_usage(None))
+        self.assertIsNone(tray.parse_model_usage({}))
+        self.assertIsNone(tray.parse_model_usage({"modelDataList": "junk"}))
+
+
 @unittest.skipUnless(sys.platform == "win32", "DPAPI доступен только на Windows")
 class TestKeyProtection(unittest.TestCase):
     def setUp(self):
