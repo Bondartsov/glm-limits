@@ -38,6 +38,9 @@ const I18N = {
     valueModeRemaining: "Remaining",
     valueModeUsed: "Used",
     save: "Save", reset: "Reset",
+    trayTitle: "Tray app (Windows)",
+    trayText: "Installed separately from the extension: run tray_install.bat in the project folder — it checks Python, installs dependencies, creates the config and enables autostart.",
+    trayManual: "Open the manual",
     saved: "Saved", resetDone: "Settings reset",
     plan: "Plan",
     utilSpent: "used", utilLeft: "left",
@@ -86,6 +89,9 @@ const I18N = {
     valueModeRemaining: "Остаток",
     valueModeUsed: "Израсходовано",
     save: "Сохранить", reset: "Сбросить",
+    trayTitle: "Приложение для трея (Windows)",
+    trayText: "Ставится отдельно от расширения: запусти tray_install.bat в папке проекта — он проверит Python, поставит зависимости, создаст конфиг и включит автозапуск.",
+    trayManual: "Открыть инструкцию",
     saved: "Сохранено", resetDone: "Настройки сброшены",
     plan: "Тариф",
     utilSpent: "израсходовано", utilLeft: "осталось",
@@ -833,6 +839,9 @@ async function init() {
   $("saveSettings").addEventListener("click", saveSettings);
   $("resetSettings").addEventListener("click", resetSettings);
   $("badgeCheck").addEventListener("change", updateBadgeField);
+  $("openManual").addEventListener("click", () => {
+    chrome.tabs.create({ url: "https://github.com/Bondartsov/glm-limits/blob/main/MANUAL.md" });
+  });
 
   $("langSelect").addEventListener("change", async (e) => {
     currentLang = e.target.value;

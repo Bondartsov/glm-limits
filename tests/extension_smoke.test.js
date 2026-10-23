@@ -134,7 +134,7 @@ const POPUP_IDS = [
   "settingsPanel", "closeSettings", "apiKeyInput", "keyState", "keyPersistCheck",
   "platformSelect", "intervalInput", "viewModeSelect", "langSelect", "themeSelect",
   "showMcpCheck", "notifyCheck", "badgeCheck", "badgeMetricSelect", "badgeModeSelect",
-  "saveSettings", "resetSettings", "toast",
+  "saveSettings", "resetSettings", "toast", "openManual",
   "refresh", "compact", "pin", "popout", "settings",
 ];
 
