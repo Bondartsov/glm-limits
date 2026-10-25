@@ -577,27 +577,34 @@ def set_autostart(enable: bool) -> None:
                 pass
 
 
-def acquire_single_instance() -> bool:
+def acquire_single_instance(timeout: float = 0.0) -> bool:
     """True, если этот процесс — единственный экземпляр трея (Windows mutex).
 
-    Без этого двойной клик по .pyw даёт две иконки и два параллельных опроса.
+    timeout > 0 — ждать освобождения мьютекса: нужно при самоперезапуске,
+    когда старая копия ещё завершается. Обычный запуск (timeout=0) сразу
+    выходит, если трей уже работает.
     """
-    try:
-        import ctypes
-        from ctypes import wintypes
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        kernel32.CreateMutexW.restype = wintypes.HANDLE
-        handle = kernel32.CreateMutexW(None, False, "Global\\GLMLimitsTray")
-        if not handle:
+    deadline = time.time() + max(0.0, timeout)
+    while True:
+        try:
+            import ctypes
+            from ctypes import wintypes
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.CreateMutexW.restype = wintypes.HANDLE
+            handle = kernel32.CreateMutexW(None, False, "Global\\GLMLimitsTray")
+            if not handle:
+                return True
+            if ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS
+                kernel32.CloseHandle(handle)
+                if time.time() >= deadline:
+                    return False
+                time.sleep(0.5)
+                continue
+            # Хэндл намеренно не закрываем — он держится до конца процесса.
             return True
-        if ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS
-            kernel32.CloseHandle(handle)
-            return False
-        # Хэндл намеренно не закрываем — он держится до конца процесса.
-        return True
-    except Exception:
-        logger.exception("Не удалось проверить единственный экземпляр")
-        return True
+        except Exception:
+            logger.exception("Не удалось проверить единственный экземпляр")
+            return True
 
 
 def load_notif_state() -> dict[str, Any]:
@@ -1194,7 +1201,7 @@ class TrayApp:
                 # Запускаем через pythonw: даже если трей был стартован из
                 # консоли, новая копия не должна открывать окно консоли.
                 subprocess.Popen(
-                    [_pythonw_path(), str(Path(__file__).resolve())],
+                    [_pythonw_path(), str(Path(__file__).resolve()), "--wait-instance"],
                     creationflags=flags, startupinfo=startupinfo, close_fds=True,
                 )
                 logger.info("Новый процесс трея запущен, текущий завершается")
@@ -1206,6 +1213,9 @@ class TrayApp:
             self.wake.set()
             if self.icon:
                 self.icon.stop()
+            # Без остановки Tk-цикла процесс остаётся жить зомби и держит
+            # мьютекс — тогда новый экземпляр не может стартовать.
+            self._post_ui(self._shutdown_ui)
 
         threading.Thread(target=worker, name="restart", daemon=True).start()
 
@@ -1659,7 +1669,9 @@ def main(argv: list[str]) -> int:
         print(msg)
         return 1
 
-    if not acquire_single_instance():
+    # При самоперезапуске новая копия ждёт, пока старая отпустит мьютекс.
+    wait_ms = 15.0 if "--wait-instance" in argv else 0.0
+    if not acquire_single_instance(timeout=wait_ms):
         msg = "GLM Limits уже запущен — второй экземпляр закрыт."
         logger.info(msg)
         print(msg)
