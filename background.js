@@ -332,7 +332,9 @@ async function poll() {
     noteSuccess();
     return latest;
   } catch (e) {
-    await chrome.storage.local.set({ latest: { ok: false, error: String(e), ts: Date.now() } });
+    await chrome.storage.local.set({
+      latest: { ok: false, error: humanizeError(e, st.lang), ts: Date.now() },
+    });
     noteFailure();
     throw e;
   } finally {
@@ -428,6 +430,22 @@ function fireNotification(lang, kind, used, threshold, resetsAt) {
       message,
     });
   } catch (e) {}
+}
+
+// Понятный текст вместо «Failed to fetch» в попапе.
+function humanizeError(e, lang) {
+  const text = String((e && e.message) || e);
+  const low = text.toLowerCase();
+  const ru = lang === "ru";
+  if (low.includes("failed to fetch") || low.includes("networkerror") ||
+      low.includes("net::err")) {
+    return ru ? "Нет соединения с API — проверь сеть/VPN (DNS)"
+              : "No connection to the API — check network/VPN (DNS)";
+  }
+  if (low.includes("abort") || low.includes("timeout")) {
+    return ru ? "API не ответил вовремя" : "API timed out";
+  }
+  return text;
 }
 
 // Уведомление о СБРОСЕ окна: старый resetsAt истёк, появился новый.

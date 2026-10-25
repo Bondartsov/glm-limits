@@ -313,6 +313,32 @@ def set_value_mode(mode: str) -> bool:
         return False
 
 
+def _is_network_error(exc: Exception) -> bool:
+    text = (type(exc).__name__ + " " + str(exc)).lower()
+    return any(k in text for k in ("connectionerror", "timeout", "getaddrinfo",
+                                   "failed to resolve", "name resolution", "ssl"))
+
+
+def human_error(exc: Exception, lang: str) -> str:
+    """Понятный текст вместо HTTPSConnectionPool(...) в подсказке и окне."""
+    text = str(exc)
+    low = text.lower()
+    ru = lang == "ru"
+    if any(k in low for k in ("getaddrinfo", "failed to resolve", "name resolution")):
+        return ("Нет соединения: не удаётся разрешить адрес API (DNS). Проверь сеть/VPN."
+                if ru else "No connection: cannot resolve the API host (DNS). Check network/VPN.")
+    if "timed out" in low or "timeout" in low:
+        return ("API не ответил вовремя — сеть медленная или недоступна."
+                if ru else "API timed out — network is slow or unreachable.")
+    if "certificate" in low or "ssl" in low:
+        return ("Ошибка TLS-сертификата (корпоративный прокси или антивирус?)."
+                if ru else "TLS certificate error (corporate proxy or antivirus?).")
+    if "401" in low or "403" in low:
+        return ("Ключ не принят (401/403) — проверь ключ и платформу."
+                if ru else "Key rejected (401/403) — check key and platform.")
+    return text[:160]
+
+
 def parse_model_usage(data: dict[str, Any] | None) -> dict[str, Any] | None:
     """Разбор ответа /api/monitor/usage/model-usage: доли по моделям."""
     if not isinstance(data, dict):
@@ -879,7 +905,16 @@ class TrayApp:
                     self.state.set({"ok": False, "error": self.tr("no_key"), "ts": time.time()})
                 else:
                     try:
-                        data = fetch_quota(cfg["apiKey"], cfg["platform"])
+                        try:
+                            data = fetch_quota(cfg["apiKey"], cfg["platform"])
+                        except Exception as first:
+                            # DNS/сеть часто «флапают» — один повтор через 3 с.
+                            if not _is_network_error(first):
+                                raise
+                            logger.info("Сетевой сбой (%s), повтор через 3 с",
+                                        type(first).__name__)
+                            time.sleep(3)
+                            data = fetch_quota(cfg["apiKey"], cfg["platform"])
                         self.state.set(data)
                         self.check_notifications(cfg, data)
                         self._remember_usage(data)
@@ -900,7 +935,9 @@ class TrayApp:
                         )
                         logger.warning("Ошибка опроса (подряд %s), следующий через %sс: %s",
                                        streak, interval, exc)
-                        self.state.set({"ok": False, "error": str(exc)[:200], "ts": time.time()})
+                        self.state.set({"ok": False,
+                                        "error": human_error(exc, cfg["lang"]),
+                                        "ts": time.time()})
                 self.refresh_icon()
             except Exception:
                 # Поток опроса не должен умирать: иначе иконка застынет навсегда.

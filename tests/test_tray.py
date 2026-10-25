@@ -331,6 +331,27 @@ class TestModelUsage(unittest.TestCase):
         self.assertIsNone(tray.parse_model_usage({"modelDataList": "junk"}))
 
 
+
+class TestHumanError(unittest.TestCase):
+    def test_dns_error_is_human(self):
+        exc = Exception("HTTPSConnectionPool(host='open.bigmodel.cn', port=443): "
+                        "Failed to resolve 'open.bigmodel.cn' ([Errno 11001] getaddrinfo failed)")
+        msg = tray.human_error(exc, "ru")
+        self.assertIn("DNS", msg)
+        self.assertNotIn("HTTPSConnectionPool", msg)
+
+    def test_timeout(self):
+        msg = tray.human_error(Exception("Connection to open.bigmodel.cn timed out"), "ru")
+        self.assertIn("вовремя", msg)
+
+    def test_key_rejected(self):
+        msg = tray.human_error(Exception("https://host -> 401"), "ru")
+        self.assertIn("Ключ не принят", msg)
+
+    def test_unknown_passthrough(self):
+        self.assertEqual(tray.human_error(Exception("boom"), "ru"), "boom")
+
+
 @unittest.skipUnless(sys.platform == "win32", "DPAPI доступен только на Windows")
 class TestKeyProtection(unittest.TestCase):
     def setUp(self):

@@ -448,3 +448,17 @@ test("диагностика: отчёт содержит проверки кл�
   assert.ok(report.includes("Тариф: max"), report);
   assert.ok(report.includes("Разбивка по моделям"), report);
 });
+
+test("humanizeError: сетевые сбои превращаются в понятный текст", () => {
+  const chrome = makeChromeMock();
+  const dom = makeDomMock(POPUP_IDS);
+  const ctx = makeContext(chrome, dom, {
+    importScripts: (...files) => { for (const f of files) runScript(ctx, f); },
+    fetch: async () => ({ ok: false, status: 500, json: async () => ({}) }),
+  });
+  runScript(ctx, "background.js");
+
+  assert.ok(ctx.humanizeError(new Error("Failed to fetch"), "ru").includes("Нет соединения"));
+  assert.ok(ctx.humanizeError(new Error("AbortError: aborted"), "ru").includes("вовремя"));
+  assert.equal(ctx.humanizeError(new Error("boom"), "ru"), "boom");
+});
