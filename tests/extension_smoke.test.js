@@ -138,6 +138,7 @@ const POPUP_IDS = [
   "platformSelect", "intervalInput", "viewModeSelect", "langSelect", "themeSelect",
   "showMcpCheck", "notifyCheck", "badgeCheck", "badgeMetricSelect", "badgeModeSelect",
   "saveSettings", "resetSettings", "toast", "openManual", "runDiag", "diagOut",
+  "autoUpdateCheck", "trayStatus", "trayUpdateNow", "trayRefresh",
   "refresh", "compact", "pin", "popout", "settings",
 ];
 
@@ -510,4 +511,35 @@ test("попап: при исчерпанной неделе — 0% и штам�
   const flag = dom.getElementById("sessionFlag");
   assert.equal(flag.style.display, "", "штамп должен быть видим");
   assert.ok(flag.textContent.includes("Недоступно"), flag.textContent);
+});
+
+test("тумблер автообновления: статус трея и переключение через локальный API", async () => {
+  const calls = [];
+  const chrome = makeChromeMock();
+  const dom = makeDomMock(POPUP_IDS);
+  const ctx = makeContext(chrome, dom, {
+    importScripts: (...files) => { for (const f of files) runScript(ctx, f); },
+    fetch: async (url, opts) => {
+      const u = String(url);
+      calls.push({ url: u, opts });
+      if (u.endsWith("/status")) {
+        return { ok: true, status: 200, json: async () => ({ ok: true, version: "0.7.20", autoUpdate: true }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ ok: true, autoUpdate: false }) };
+    },
+  });
+  runScript(ctx, "quota.js");
+  runScript(ctx, "keyring.js");
+  runScript(ctx, "popup.js");
+
+  await ctx.refreshTrayStatus();
+  assert.equal(dom.getElementById("autoUpdateCheck").checked, true, "тумблер отражает состояние трея");
+  assert.ok(dom.getElementById("trayStatus").textContent.includes("0.7.20"),
+    dom.getElementById("trayStatus").textContent);
+
+  await ctx.setTrayAutoUpdate(false);
+  const post = calls.find((c) => c.url.endsWith("/autoUpdate"));
+  assert.ok(post, "POST /autoUpdate отправлен");
+  assert.equal(post.opts.method, "POST");
+  assert.ok(post.opts.body.includes("false"));
 });

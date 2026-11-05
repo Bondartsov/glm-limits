@@ -41,6 +41,12 @@ const I18N = {
     trayTitle: "Tray app (Windows)",
     trayText: "Installed separately from the extension: run tray_install.bat in the project folder — it checks Python, installs dependencies, creates the config and enables autostart.",
     trayManual: "Open the manual",
+    autoUpdateLabel: "Auto-update (via tray)",
+    updateNow: "Update now", trayRefresh: "Check tray",
+    trayRunning: "Tray: running v{v}",
+    trayNotRunning: "Tray is not running — start tray_install.bat",
+    autoUpdateOn: "auto-update on", autoUpdateOff: "auto-update off",
+    updateStarted: "Update started — the extension will reload itself",
     diagRun: "Check setup",
     saved: "Saved", resetDone: "Settings reset",
     plan: "Plan",
@@ -99,6 +105,12 @@ const I18N = {
     trayTitle: "Приложение для трея (Windows)",
     trayText: "Ставится отдельно от расширения: запусти tray_install.bat в папке проекта — он проверит Python, поставит зависимости, создаст конфиг и включит автозапуск.",
     trayManual: "Открыть инструкцию",
+    autoUpdateLabel: "Автообновление (через трей)",
+    updateNow: "Обновить сейчас", trayRefresh: "Проверить трей",
+    trayRunning: "Трей: запущен v{v}",
+    trayNotRunning: "Трей не запущен — запусти tray_install.bat",
+    autoUpdateOn: "автообновление вкл", autoUpdateOff: "автообновление выкл",
+    updateStarted: "Обновление запущено — расширение перезапустится само",
     diagRun: "Проверить настройку",
     saved: "Сохранено", resetDone: "Настройки сброшены",
     plan: "Тариф",
@@ -970,6 +982,67 @@ async function runDiagnostics() {
   out.textContent = lines.join("\n");
 }
 
+
+// ── Трей: статус и автообновление ─────────────────────────
+// Расширение не может обновлять код само; этим занимается трей. Общаемся
+// с ним по локальному HTTP (127.0.0.1), только чтение статуса и две команды.
+const TRAY_API = "http://127.0.0.1:47563";
+const TRAY_HEADERS = { "X-GLM-Limits": "1" };
+
+async function fetchTrayStatus() {
+  try {
+    const r = await withTimeout(fetch(TRAY_API + "/status", { headers: TRAY_HEADERS }), 1500);
+    if (!r.ok) return null;
+    return await r.json();
+  } catch (e) {
+    return null;
+  }
+}
+
+async function refreshTrayStatus() {
+  const box = $("autoUpdateCheck");
+  const lbl = $("trayStatus");
+  const st = await fetchTrayStatus();
+  if (!st) {
+    if (box) { box.checked = false; box.disabled = true; }
+    if (lbl) lbl.textContent = t("trayNotRunning");
+    return;
+  }
+  if (box) { box.disabled = false; box.checked = Boolean(st.autoUpdate); }
+  if (lbl) {
+    lbl.textContent = t("trayRunning").replace("{v}", st.version || "?") + " · " +
+      (st.autoUpdate ? t("autoUpdateOn") : t("autoUpdateOff"));
+  }
+}
+
+async function setTrayAutoUpdate(enabled) {
+  try {
+    const r = await withTimeout(fetch(TRAY_API + "/autoUpdate", {
+      method: "POST",
+      headers: Object.assign({ "Content-Type": "application/json" }, TRAY_HEADERS),
+      body: JSON.stringify({ enabled: Boolean(enabled) }),
+    }), 2500);
+    const body = await r.json();
+    showToast(body.ok
+      ? (enabled ? t("autoUpdateOn") : t("autoUpdateOff"))
+      : t("statusError"));
+  } catch (e) {
+    showToast(t("trayNotRunning"));
+  }
+  await refreshTrayStatus();
+}
+
+async function runTrayUpdate() {
+  try {
+    const r = await withTimeout(fetch(TRAY_API + "/update", {
+      method: "POST", headers: TRAY_HEADERS,
+    }), 2500);
+    showToast(r.ok ? t("updateStarted") : t("statusError"));
+  } catch (e) {
+    showToast(t("trayNotRunning"));
+  }
+}
+
 // ── Переключатели ─────────────────────────────────────────
 function toggleCompact() {
   const next = currentSettings.viewMode === "compact" ? "popup" : "compact";
@@ -1104,6 +1177,9 @@ async function init() {
   $("resetSettings").addEventListener("click", resetSettings);
   $("badgeCheck").addEventListener("change", updateBadgeField);
   $("runDiag").addEventListener("click", runDiagnostics);
+  $("autoUpdateCheck").addEventListener("change", (e) => setTrayAutoUpdate(e.target.checked));
+  $("trayUpdateNow").addEventListener("click", runTrayUpdate);
+  $("trayRefresh").addEventListener("click", refreshTrayStatus);
   try {
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     mq.addEventListener("change", () => {

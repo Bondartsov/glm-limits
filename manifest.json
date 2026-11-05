@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "GLM Limits",
-  "version": "0.7.20",
+  "version": "0.7.21",
   "description": "Остаток лимитов GLM Coding Plan: 5-часовая сессия и неделя — одним взглядом.",
   "icons": {
     "16": "icons/icon16.png",
@@ -16,7 +16,8 @@
   "host_permissions": [
     "https://open.bigmodel.cn/*",
     "https://api.z.ai/*",
-    "https://raw.githubusercontent.com/*"
+    "https://raw.githubusercontent.com/*",
+    "http://127.0.0.1/*"
   ],
   "action": {
     "default_popup": "popup.html",

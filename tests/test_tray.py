@@ -394,6 +394,77 @@ class TestVersionCompare(unittest.TestCase):
         self.assertFalse(tray.is_newer_version("", "0.7.20"))
 
 
+
+class TestZipUpdate(unittest.TestCase):
+    def test_apply_zip_update_keeps_private_files(self):
+        import zipfile
+        with tempfile.TemporaryDirectory() as tmp:
+            tmpdir = Path(tmp)
+            zip_path = tmpdir / "main.zip"
+            with zipfile.ZipFile(zip_path, "w") as zf:
+                zf.writestr("glm-limits-main/manifest.json", '{"version":"1.0.0"}')
+                zf.writestr("glm-limits-main/tray/tray_glm_limits.pyw", "x = 1")
+                zf.writestr("glm-limits-main/tray/tray_config.json", '{"apiKey":"SECRET"}')
+                zf.writestr("glm-limits-main/tray/tray_app.log", "log")
+                zf.writestr("../evil.txt", "bad")
+
+            target = tmpdir / "dest"
+            (target / "tray").mkdir(parents=True)
+            (target / "tray" / "tray_config.json").write_text('{"apiKey":"KEEP"}', encoding="utf-8")
+
+            count = tray.apply_zip_update(zip_path, target)
+
+            self.assertGreaterEqual(count, 2)
+            self.assertEqual((target / "manifest.json").read_text(encoding="utf-8"), '{"version":"1.0.0"}')
+            self.assertEqual((target / "tray" / "tray_glm_limits.pyw").read_text(encoding="utf-8"), "x = 1")
+            self.assertEqual((target / "tray" / "tray_config.json").read_text(encoding="utf-8"),
+                             '{"apiKey":"KEEP"}', "конфиг с ключом не перезаписывается")
+            self.assertFalse((target / "tray" / "tray_app.log").exists(), "логи не перезаписываются")
+            self.assertFalse((tmpdir / "evil.txt").exists(), "path traversal заблокирован")
+
+
+class TestTrayApi(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        tmp = Path(self._tmp.name)
+        self._orig_config = tray.CONFIG_PATH
+        self._orig_state = tray.STATE_PATH
+        tray.CONFIG_PATH = tmp / "tray_config.json"
+        tray.STATE_PATH = tmp / "tray_state.json"
+
+    def tearDown(self):
+        tray.CONFIG_PATH = self._orig_config
+        tray.STATE_PATH = self._orig_state
+        self._tmp.cleanup()
+
+    def test_status_and_auto_update_toggle(self):
+        import threading
+        from http.server import ThreadingHTTPServer
+
+        app = tray.TrayApp()
+        handler = type("BoundHandler", (tray.ApiHandler,), {"app": app})
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        port = server.server_address[1]
+        base = "http://127.0.0.1:%d" % port
+        headers = {"X-GLM-Limits": "1"}
+        try:
+            r = tray.requests.get(base + "/status", headers=headers, timeout=3)
+            self.assertEqual(r.status_code, 200)
+            self.assertTrue(r.json()["ok"])
+
+            forbidden = tray.requests.get(base + "/status", timeout=3)
+            self.assertEqual(forbidden.status_code, 403, "без заголовка — отказ")
+
+            r2 = tray.requests.post(base + "/autoUpdate", headers=headers,
+                                    json={"enabled": True}, timeout=3)
+            self.assertEqual(r2.status_code, 200)
+            self.assertTrue(r2.json()["autoUpdate"])
+            self.assertTrue(tray.load_config()["autoUpdate"], "настройка сохранена в конфиг")
+        finally:
+            server.shutdown()
+
+
 @unittest.skipUnless(sys.platform == "win32", "DPAPI доступен только на Windows")
 class TestKeyProtection(unittest.TestCase):
     def setUp(self):

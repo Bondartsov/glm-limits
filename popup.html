@@ -238,6 +238,18 @@
           </select>
         </div>
 
+        <div class="field">
+          <label class="check-row">
+            <input type="checkbox" id="autoUpdateCheck">
+            <span data-i18n="autoUpdateLabel">Автообновление (через трей)</span>
+          </label>
+          <small id="trayStatus" class="key-state">—</small>
+          <div class="actions-row">
+            <button id="trayUpdateNow" class="btn-ghost btn-small" data-i18n="updateNow">Обновить сейчас</button>
+            <button id="trayRefresh" class="btn-ghost btn-small" data-i18n="trayRefresh">Проверить трей</button>
+          </div>
+        </div>
+
         <div class="tray-block">
           <div class="tray-title" data-i18n="trayTitle">Приложение для трея (Windows)</div>
           <div class="tray-text" data-i18n="trayText">Ставится отдельно от расширения: запусти tray_install.bat в папке проекта — он проверит Python, поставит зависимости, создаст конфиг и включит автозапуск.</div>

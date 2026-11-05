@@ -33,9 +33,12 @@ import os
 import queue
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import traceback
+import zipfile
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -57,7 +60,10 @@ REPO_DIR = BASE_DIR.parent          # корень репозитория (дл�
 CONFIG_PATH = BASE_DIR / "tray_config.json"
 LOG_PATH = BASE_DIR / "tray_app.log"
 STATE_PATH = BASE_DIR / "tray_state.json"
-CRASH_PATH = BASE_DIR / "tray_crash.log"   # флаги уведомлений (в git не попадает)
+CRASH_PATH = BASE_DIR / "tray_crash.log"
+RAW_MANIFEST_URL = "https://raw.githubusercontent.com/Bondartsov/glm-limits/main/manifest.json"
+ZIP_URL = "https://codeload.github.com/Bondartsov/glm-limits/zip/refs/heads/main"
+DEFAULT_API_PORT = 47563   # флаги уведомлений (в git не попадает)
 
 # Третьесторонние зависимости импортируются под защитой: .pyw работает без
 # консоли, и падение на импорте выглядело бы как «не запускается» — молча.
@@ -359,6 +365,44 @@ def human_error(exc: Exception, lang: str) -> str:
     return text[:160]
 
 
+def _port_or_default(value: Any) -> int:
+    try:
+        port = int(value)
+    except (TypeError, ValueError):
+        return DEFAULT_API_PORT
+    return port if 1024 <= port <= 65535 else DEFAULT_API_PORT
+
+
+def apply_zip_update(zip_path: Path, target: Path) -> int:
+    """Распаковывает архив GitHub поверх папки проекта.
+
+    Нужен для копий, установленных из ZIP (не git-клон). Конфиг с ключом,
+    состояние уведомлений и логи НЕ перезаписываются.
+    """
+    protected = {"tray_config.json", "tray_state.json",
+                 "tray_app.log", "tray_crash.log"}
+    count = 0
+    with zipfile.ZipFile(zip_path) as zf:
+        names = zf.namelist()
+        # Корневая папка архива: первый сегмент первого пути ("glm-limits-main/...").
+        root = names[0].split("/")[0] if names and "/" in names[0] else None
+        for name in names:
+            if name.endswith("/"):
+                continue
+            rel = name
+            if root and rel.startswith(root + "/"):
+                rel = rel[len(root) + 1:]
+            if rel.startswith("/") or ".." in Path(rel).parts:
+                continue   # защита от path traversal
+            if Path(rel).name in protected:
+                continue
+            dest = target / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(zf.read(name))
+            count += 1
+    return count
+
+
 def is_newer_version(candidate: str, current: str) -> bool:
     """True, только если candidate новее current (0.7.20 > 0.7.19)."""
     def parts(v: str) -> list[int]:
@@ -469,6 +513,7 @@ def load_config() -> dict[str, Any]:
         "apiKey": api_key,
         "valueMode": "used" if str(cfg.get("valueMode") or "").lower() == "used" else "remaining",
         "autoUpdate": cfg.get("autoUpdate") is True,
+        "apiPort": _port_or_default(cfg.get("apiPort")),
         "platform": platform if platform in PLATFORMS else "auto",
         "intervalSec": interval,
         "lang": "en" if str(cfg.get("lang") or "ru").lower() == "en" else "ru",
@@ -627,6 +672,17 @@ def is_autostart_on() -> bool:
         return False
 
 
+def read_autostart_value() -> str | None:
+    """Текущее значение автозапуска в реестре (None — нет записи)."""
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as key:
+            value, _ = winreg.QueryValueEx(key, APP_NAME)
+            return str(value)
+    except OSError:
+        return None
+
+
 def set_autostart(enable: bool) -> None:
     import winreg
     with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, RUN_KEY, 0,
@@ -708,6 +764,75 @@ def repo_update_time() -> str:
         return datetime.fromtimestamp(mtime).strftime("%d.%m.%Y %H:%M")
     except OSError:
         return ""
+
+
+class ApiHandler(BaseHTTPRequestHandler):
+    """Локальный API для расширения: статус, тумблер автообновления, запуск.
+
+    Слушаем только 127.0.0.1 и требуем заголовок X-GLM-Limits: он делает
+    запрос «непростым», поэтому чужие веб-страницы не смогут им воспользоваться
+    (CORS мы не разрешаем).
+    """
+    app: Any = None
+
+    def log_message(self, *args: Any) -> None:
+        return   # не шумим в лог на каждый запрос
+
+    def _send(self, code: int, payload: dict[str, Any]) -> None:
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _allowed(self) -> bool:
+        return self.headers.get("X-GLM-Limits") == "1"
+
+    def do_GET(self) -> None:  # noqa: N802 (имя задаёт BaseHTTPRequestHandler)
+        if not self._allowed():
+            self._send(403, {"ok": False, "error": "forbidden"})
+            return
+        if self.path != "/status":
+            self._send(404, {"ok": False, "error": "not found"})
+            return
+        cfg = load_config()
+        app = self.app
+        self._send(200, {
+            "ok": True,
+            "version": read_repo_version(),
+            "autoUpdate": bool(cfg.get("autoUpdate")),
+            "valueMode": cfg.get("valueMode"),
+            "remoteVersion": getattr(app, "_remote_version", None) if app else None,
+            "running": bool(app and app.icon),
+        })
+
+    def do_POST(self) -> None:  # noqa: N802
+        if not self._allowed():
+            self._send(403, {"ok": False, "error": "forbidden"})
+            return
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(length) or b"{}")
+        except Exception:
+            body = {}
+        if self.path == "/autoUpdate":
+            enabled = bool(body.get("enabled"))
+            ok = set_auto_update(enabled)
+            if self.app:
+                self.app.current_cfg["autoUpdate"] = enabled
+            logger.info("Автообновление через расширение: %s", "вкл" if enabled else "выкл")
+            self._send(200 if ok else 500, {"ok": ok, "autoUpdate": enabled})
+        elif self.path == "/update":
+            app = self.app
+            if app is None:
+                self._send(500, {"ok": False, "error": "no app"})
+                return
+            threading.Thread(target=app._update_extension_worker, daemon=True).start()
+            logger.info("Обновление запущено из расширения")
+            self._send(202, {"ok": True, "started": True})
+        else:
+            self._send(404, {"ok": False, "error": "not found"})
 
 
 class State:
@@ -1040,6 +1165,21 @@ class TrayApp:
     def _update_extension_worker(self) -> None:
         lang = self.current_cfg["lang"]
         try:
+            if (REPO_DIR / ".git").exists():
+                if self._update_via_git(lang):
+                    return
+            # Не git-клон (установка из ZIP) или git не сработал — тянем архив.
+            if self._update_via_zip(lang):
+                return
+            self._notify_tray(STRINGS[lang]["upd_fail"].format(
+                e="git недоступен и ZIP не скачался — проверь сеть"))
+        except Exception as exc:
+            logger.exception("Обновление расширения не удалось")
+            self._notify_tray(STRINGS[lang]["upd_fail"].format(e=str(exc)[:80]))
+
+    def _update_via_git(self, lang: str) -> bool:
+        """True — попытка обработана; False — git не сработал, нужен ZIP."""
+        try:
             before = self._git_head()
             proc = run_hidden(
                 ["git", "-C", str(REPO_DIR), "pull", "--ff-only", "origin", "main"],
@@ -1048,27 +1188,52 @@ class TrayApp:
             out = (proc.stdout or "") + (proc.stderr or "")
             logger.info("git pull: %s", out.strip()[:300])
             if proc.returncode != 0:
-                raise RuntimeError((out.strip() or "git failed")[:120])
+                logger.warning("git pull не удался — перехожу на ZIP")
+                return False
             after = self._git_head()
-            # Сравниваем SHA, а не текст вывода: текст git локализован.
             if not after or before == after:
                 self._notify_tray(self.tr("upd_none"))
-                return
-            # После pull проверяем целостность: если файлы дописались не все,
-            # расширение нельзя перезапускать — оно станет «сломанным».
+                return True
             if not self._validate_repo():
                 logger.error("Обновление получилось неполным — перезапуск отменён")
                 self._notify_tray(STRINGS[lang]["upd_incomplete"])
-                return
+                return True
             if self._git_touched_tray(before, after):
-                # Обновились файлы самого трея — текущий процесс со старым
-                # кодом: перезапускаем себя, чтобы новый код заработал сразу.
                 self.restart_self(self.tr("tray_restarting"))
             else:
                 self._notify_tray(STRINGS[lang]["upd_done_ver"].format(v=read_repo_version()))
-        except Exception as exc:
-            logger.exception("Обновление расширения не удалось")
-            self._notify_tray(STRINGS[lang]["upd_fail"].format(e=str(exc)[:80]))
+            return True
+        except Exception:
+            logger.exception("git-обновление не удалось")
+            return False
+
+    def _update_via_zip(self, lang: str) -> bool:
+        """Обновление архивом с GitHub — для копий, установленных из ZIP."""
+        try:
+            old_version = read_repo_version()
+            with tempfile.TemporaryDirectory() as tmp:
+                zip_path = Path(tmp) / "main.zip"
+                logger.info("Скачиваю архив: %s", ZIP_URL)
+                resp = requests.get(ZIP_URL, timeout=90)
+                if resp.status_code != 200:
+                    raise RuntimeError("архив: HTTP %s" % resp.status_code)
+                zip_path.write_bytes(resp.content)
+                updated = apply_zip_update(zip_path, REPO_DIR)
+            logger.info("ZIP-обновление: %s файлов", updated)
+            if not self._validate_repo():
+                logger.error("После ZIP-обновления файлы неполные")
+                self._notify_tray(STRINGS[lang]["upd_incomplete"])
+                return True
+            new_version = read_repo_version()
+            if old_version == new_version:
+                self._notify_tray(self.tr("upd_none"))
+                return True
+            self._notify_tray(STRINGS[lang]["upd_done_ver"].format(v=new_version))
+            self.restart_self(self.tr("tray_restarting"))
+            return True
+        except Exception:
+            logger.exception("ZIP-обновление не удалось")
+            return False
 
     @staticmethod
     def _validate_repo() -> bool:
@@ -1150,26 +1315,23 @@ class TrayApp:
 
     @staticmethod
     def _fetch_remote_version() -> str | None:
-        """Версия в origin/main, если она новее локальной."""
+        """Версия на GitHub, если она новее локальной.
+
+        Через HTTP (raw manifest), а не git: работает и для ZIP-копий,
+        и не запускает внешних процессов.
+        """
         try:
-            run_hidden(
-                ["git", "-C", str(REPO_DIR), "fetch", "--quiet", "origin", "main"],
-                timeout=60,
-            )
-            proc = run_hidden(
-                ["git", "-C", str(REPO_DIR), "show", "origin/main:manifest.json"],
-                timeout=15,
-            )
-            if proc.returncode != 0:
+            resp = requests.get(RAW_MANIFEST_URL, timeout=15)
+            if resp.status_code != 200:
+                logger.warning("raw manifest: HTTP %s", resp.status_code)
                 return None
-            data = json.loads(proc.stdout)
-            remote = str(data.get("version") or "")
+            remote = str((resp.json() or {}).get("version") or "")
             local = read_repo_version()
             if remote and local and remote != local and is_newer_version(remote, local):
                 return remote
             return None
         except Exception:
-            logger.exception("Не удалось получить версию из репозитория")
+            logger.exception("Не удалось получить версию с GitHub")
             return None
 
     def line_update(self, *args: Any) -> str:
@@ -1667,6 +1829,36 @@ class TrayApp:
         win.after(60, draw_ring)
         win.after(60, draw_chart)
 
+    def _heal_autostart(self) -> None:
+        """Если автозапуск включён, но путь в реестре устарел — исправляем
+        (перенесли папку, обновился Python: «не всегда включается»)."""
+        try:
+            if not is_autostart_on():
+                logger.info("Автозапуск выключен")
+                return
+            expected = autostart_command()
+            current = read_autostart_value()
+            if current and current != expected:
+                set_autostart(True)
+                logger.info("Автозапуск исправлен: %s", expected)
+            else:
+                logger.info("Автозапуск включён")
+        except Exception:
+            logger.exception("Не удалось проверить автозапуск")
+
+    def _start_api(self) -> None:
+        """Локальный API для расширения (статус/тумблер/обновление)."""
+        try:
+            port = _port_or_default(load_config().get("apiPort"))
+            handler = type("BoundApiHandler", (ApiHandler,), {"app": self})
+            server = ThreadingHTTPServer(("127.0.0.1", port), handler)
+            threading.Thread(target=server.serve_forever, name="api", daemon=True).start()
+            logger.info("Локальный API: http://127.0.0.1:%s", port)
+        except OSError:
+            logger.warning("Порт локального API занят — тумблер в расширении недоступен")
+        except Exception:
+            logger.exception("Не удалось запустить локальный API")
+
     def run(self) -> None:
         """pystray — в фоновом потоке, Tk — в главном: Tk из чужого потока
         на Windows может уронить процесс без traceback."""
@@ -1676,8 +1868,10 @@ class TrayApp:
             logger.exception("Tkinter недоступен")
             return
 
+        self._heal_autostart()
         threading.Thread(target=self.poll_worker, name="poll", daemon=True).start()
         threading.Thread(target=self._icon_worker, name="icon", daemon=True).start()
+        self._start_api()
 
         self._root = tk.Tk()
         self._root.withdraw()
