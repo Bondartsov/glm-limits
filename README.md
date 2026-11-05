@@ -158,6 +158,7 @@ python tray/tray_glm_limits.pyw --selftest  # проверка без запус
 - `popup.js` — рендеринг, настройки, i18n, PiP
 - `icons/icon16.png`, `icon48.png`, `icon128.png` — иконки
 - `update.bat` — обновление кода из репозитория одним запуском
+- `tray/tray_reset.bat` — восстановление трея: снимает зависшие экземпляры и запускает заново
 - `tray/` — опциональный трей-компаньон на Python (иконка в системном трее)
 - `tests/` — автотесты: `node --test` (JS) и `python -m unittest discover -s tests` (Python)
 - `docs/redesign-proposal.md`, `docs/mockup.html` — предложение по редизайну и макет

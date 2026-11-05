@@ -1722,7 +1722,9 @@ def main(argv: list[str]) -> int:
     # При самоперезапуске новая копия ждёт, пока старая отпустит мьютекс.
     wait_ms = 15.0 if "--wait-instance" in argv else 0.0
     if not acquire_single_instance(timeout=wait_ms):
-        msg = "GLM Limits уже запущен — второй экземпляр закрыт."
+        msg = ("GLM Limits уже запущен — второй экземпляр закрыт. "
+               "Если иконки трея нет, значит висит прошлый процесс: "
+               "запусти tray_reset.bat — он снимет зависшие экземпляры и запустит трей.")
         logger.info(msg)
         print(msg)
         return 0
