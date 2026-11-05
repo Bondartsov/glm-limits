@@ -15,7 +15,7 @@ const ROOT = path.resolve(__dirname, "..");
 function makeChromeMock(options = {}) {
   const local = {};
   const session = {};
-  const calls = { badgeText: [], notifications: [], alarms: [], setPopup: [] };
+  const calls = { badgeText: [], titles: [], notifications: [], alarms: [], setPopup: [] };
 
   function area(store) {
     return {
@@ -55,6 +55,7 @@ function makeChromeMock(options = {}) {
     },
     action: {
       setBadgeText: async (o) => calls.badgeText.push(o.text),
+      setTitle: async (o) => calls.titles.push(o.title),
       setBadgeBackgroundColor: async () => {},
       setBadgeTextColor: async () => {},
       setPopup: async (o) => calls.setPopup.push(o.popup),
@@ -125,6 +126,7 @@ function makeDomMock(ids) {
 const POPUP_IDS = [
   "app", "status", "statusExtra", "emptyState", "emptySettings", "loading",
   "metricSession", "sessionPct", "sessionAnno", "sessionBar", "sessionChart", "sessionReset",
+  "sessionFlag",
   "sessionLegend",
   "metricWeekly", "weeklyPct", "weeklyAnno", "weeklyBar", "weeklyReset", "weeklyChart",
   "weeklyLegend",
@@ -461,4 +463,51 @@ test("humanizeError: сетевые сбои превращаются в пон�
   assert.ok(ctx.humanizeError(new Error("Failed to fetch"), "ru").includes("Нет соединения"));
   assert.ok(ctx.humanizeError(new Error("AbortError: aborted"), "ru").includes("вовремя"));
   assert.equal(ctx.humanizeError(new Error("boom"), "ru"), "boom");
+});
+
+test("бейдж: при исчерпанной неделе — 0% и пометка в подсказке", async () => {
+  const chrome = makeChromeMock();
+  const dom = makeDomMock(POPUP_IDS);
+  const ctx = makeContext(chrome, dom, {
+    importScripts: (...files) => { for (const f of files) runScript(ctx, f); },
+    fetch: async () => ({ ok: false, status: 500, json: async () => ({}) }),
+  });
+  runScript(ctx, "background.js");
+
+  await ctx.updateBadge(
+    { badge: true, badgeMetric: "s", valueMode: "remaining", lang: "ru" },
+    { utilization: 0, resetsAt: new Date(Date.now() + 3600e3).toISOString() },
+    { utilization: 100, resetsAt: new Date(Date.now() + 72 * 3600e3).toISOString() },
+  );
+
+  const lastBadge = chrome._calls.badgeText[chrome._calls.badgeText.length - 1];
+  assert.equal(lastBadge, "0", "бейдж показывает 0 доступно");
+  const lastTitle = chrome._calls.titles[chrome._calls.titles.length - 1];
+  assert.ok(lastTitle.includes("недоступно: недельный лимит"), lastTitle);
+});
+
+test("попап: при исчерпанной неделе — 0% и штамп «недоступно»", async () => {
+  const chrome = makeChromeMock();
+  const dom = makeDomMock(POPUP_IDS);
+  const ctx = makeContext(chrome, dom, {
+    importScripts: (...files) => { for (const f of files) runScript(ctx, f); },
+    fetch: async () => ({ ok: false, status: 500, json: async () => ({}) }),
+  });
+  runScript(ctx, "quota.js");
+  runScript(ctx, "keyring.js");
+  runScript(ctx, "popup.js");
+
+  chrome._local.lang = "ru";
+  chrome._local.latest = {
+    ok: true, ts: Date.now(), platform: "cn", plan: "max",
+    s: { utilization: 0, resetsAt: new Date(Date.now() + 3600e3).toISOString() },
+    w: { utilization: 100, resetsAt: new Date(Date.now() + 72 * 3600e3).toISOString() },
+  };
+  await ctx.init();
+
+  assert.equal(dom.getElementById("sessionPct").textContent, "0",
+    "показываем реальную доступность, а не 100%");
+  const flag = dom.getElementById("sessionFlag");
+  assert.equal(flag.style.display, "", "штамп должен быть видим");
+  assert.ok(flag.textContent.includes("Недоступно"), flag.textContent);
 });

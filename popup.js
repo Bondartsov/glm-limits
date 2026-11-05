@@ -48,6 +48,9 @@ const I18N = {
     sessionLeft: "Left · session (5h)", weeklyLeft: "Left · weekly", mcpLeft: "Left · MCP",
     modelsTitle: "Usage by model",
     modelsOther: "Others ({n})",
+    blockedWeekly: "Not available — weekly limit used up",
+    blockedSession: "Not available — session limit used up",
+    sessionWindowLeft: "5h window: {v}% free",
     modelsHint: "tokens today",
     chartHours: "activity by hour",
     chartDays: "spend by day of week",
@@ -103,6 +106,9 @@ const I18N = {
     sessionLeft: "Осталось · сессия (5ч)", weeklyLeft: "Осталось · неделя", mcpLeft: "Осталось · MCP",
     modelsTitle: "Расход по моделям",
     modelsOther: "Другие ({n})",
+    blockedWeekly: "Недоступно — исчерпан недельный лимит",
+    blockedSession: "Недоступно — исчерпан лимит сессии",
+    sessionWindowLeft: "окно 5ч: {v}% свободно",
     modelsHint: "токены за сегодня",
     chartHours: "активность по часам",
     chartDays: "расход по дням недели",
@@ -619,6 +625,7 @@ function showEmptyState() {
   $("metricModels").style.display = "none";
   $("planBadge").style.display = "none";
   $("footer").style.display = "none";
+  $("sessionFlag").style.display = "none";
   setStatus("offline", t("statusNoKey"));
 }
 
@@ -642,6 +649,7 @@ function render(data) {
     $("metricModels").style.display = "none";
     $("planBadge").style.display = "none";
     $("footer").style.display = "none";
+    $("sessionFlag").style.display = "none";
     return;
   }
 
@@ -651,6 +659,9 @@ function render(data) {
   $("loading").style.display = "none";
 
   const viewMode = normalizeViewMode(currentSettings.viewMode);
+  // Недельный лимит — верхний уровень: при нуле работать нельзя, даже если
+  // окно 5 часов свежее. Показываем реальную доступность, а не 100%.
+  const avail = GLMQuota.availability(data.s, data.w);
   $("compact").classList.toggle("active", viewMode === "compact");
   if (viewMode === "compact") {
     $("metricSession").style.display = "none";
@@ -661,12 +672,32 @@ function render(data) {
     $("compactView").style.display = "";
     showChip("chipSession", "chipSessionPct", data.s);
     showChip("chipWeekly", "chipWeeklyPct", data.w);
+    if (avail.blocked === "weekly") {
+      $("chipSessionPct").textContent = "0";
+      $("chipSessionPct").style.color = "var(--risk)";
+    }
     renderFooter(data);
     return;
   }
   $("compactView").style.display = "none";
 
   showHero("metricSession", "sessionPct", "sessionBar", "sessionAnno", data.s);
+  const flag = $("sessionFlag");
+  if (avail.blocked === "weekly") {
+    if (flag) { flag.textContent = t("blockedWeekly"); flag.style.display = ""; }
+    $("sessionPct").textContent = "0";
+    $("sessionPct").style.color = "var(--risk)";
+    $("sessionBar").style.width = "0%";
+    $("sessionBar").style.background = "var(--risk)";
+    const sLeft = avail.sessionLeft == null ? "—" : Math.round(avail.sessionLeft);
+    $("sessionAnno").textContent = t("sessionWindowLeft").replace("{v}", String(sLeft));
+  } else {
+    if (flag) flag.style.display = "none";
+    if (avail.blocked === "session" && flag) {
+      flag.textContent = t("blockedSession");
+      flag.style.display = "";
+    }
+  }
   showLine("metricWeekly", "weeklyPct", "weeklyBar", "weeklyReset", "weeklyAnno", data.w);
   if (currentSettings.showMcp && data.mcp) {
     showLine("metricMcp", "mcpPct", "mcpBar", "mcpReset", "mcpAnno", data.mcp);

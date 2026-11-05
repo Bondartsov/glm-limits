@@ -111,6 +111,7 @@ STRINGS = {
     "ru": {
         "session": "Сессия (5ч)", "weekly": "Неделя", "mcp": "MCP",
         "left": "осталось", "used": "израсходовано",
+        "blocked_weekly": "Недоступно — исчерпан недельный лимит",
         "value_mode_remaining": "Показывать: остаток",
         "value_mode_used": "Показывать: израсходовано",
         "no_data": "Нет данных", "error": "Ошибка",
@@ -144,6 +145,7 @@ STRINGS = {
     "en": {
         "session": "Session (5h)", "weekly": "Weekly", "mcp": "MCP",
         "left": "left", "used": "used",
+        "blocked_weekly": "Unavailable — weekly limit used up",
         "value_mode_remaining": "Show: remaining",
         "value_mode_used": "Show: used",
         "no_data": "No data", "error": "Error",
@@ -355,6 +357,25 @@ def human_error(exc: Exception, lang: str) -> str:
         return ("Ключ не принят (401/403) — проверь ключ и платформу."
                 if ru else "Key rejected (401/403) — check key and platform.")
     return text[:160]
+
+
+def is_newer_version(candidate: str, current: str) -> bool:
+    """True, только если candidate новее current (0.7.20 > 0.7.19)."""
+    def parts(v: str) -> list[int]:
+        out = []
+        for chunk in str(v).split("."):
+            try:
+                out.append(int(chunk))
+            except (TypeError, ValueError):
+                out.append(0)
+        return out
+    pa, pb = parts(candidate), parts(current)
+    for i in range(max(len(pa), len(pb))):
+        x = pa[i] if i < len(pa) else 0
+        y = pb[i] if i < len(pb) else 0
+        if x != y:
+            return x > y
+    return False
 
 
 def parse_model_usage(data: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -766,7 +787,11 @@ class TrayApp:
             return f"{APP_NAME} — {self.tr('error')}: {err}"[:127]
         parts = []
         s, w = d.get("s"), d.get("w")
-        if s:
+        blocked = bool(w and float(w.get("used") or 0) >= 100)
+        if blocked:
+            parts.append(f"0% {self.tr('left')}")
+            parts.append(self.tr("blocked_weekly"))
+        elif s:
             parts.append(f"{100 - int(s['used'])}% {self.tr('left')}, "
                          f"{self.tr('reset')} {fmt_countdown(s['resets_at'], lang)}")
         if w:
@@ -811,7 +836,10 @@ class TrayApp:
         win = d.get("s") or d.get("w") if d.get("ok") else None
         if win:
             used = float(win["used"])
-            self.icon.icon = render_icon(int(round(self._display(used))), color_for(used))
+            weekly = d.get("w")
+            blocked = bool(weekly and float(weekly.get("used") or 0) >= 100)
+            shown = 0 if blocked else int(round(self._display(used)))
+            self.icon.icon = render_icon(shown, COLOR_RED if blocked else color_for(used))
         else:
             self.icon.icon = render_icon(None, COLOR_GRAY)
         self.icon.title = self.tooltip()
@@ -827,7 +855,7 @@ class TrayApp:
             win_data = data.get(kind)
             if win_data:
                 self._check_one(cfg, kind, name_key, win_data)
-                self._check_reset(cfg, kind, name_key, win_data)
+                self._check_reset(cfg, kind, name_key, win_data, data.get("w"))
 
     def _check_one(self, cfg: dict[str, Any], kind: str, name_key: str,
                    win_data: dict[str, Any]) -> None:
@@ -856,7 +884,8 @@ class TrayApp:
                 break
 
     def _check_reset(self, cfg: dict[str, Any], kind: str, name_key: str,
-                     win_data: dict[str, Any]) -> None:
+                     win_data: dict[str, Any],
+                     weekly: dict[str, Any] | None = None) -> None:
         """Уведомление о СБРОСЕ окна: старый resetsAt истёк, появился новый."""
         resets = self.state.notif.setdefault("reset", {})
         win = win_data.get("resets_at")
@@ -885,7 +914,21 @@ class TrayApp:
         name = self.tr(name_key)
         cd = fmt_countdown(win, cfg["lang"])
         when = fmt_reset_moment(win, cfg["lang"])
-        if cfg["lang"] == "ru":
+        # Недельный лимит — верхний уровень: при нуле «сброс сессии» не значит,
+        # что можно работать.
+        blocked = (kind == "s" and weekly is not None
+                   and float(weekly.get("used") or 0) >= 100)
+        if blocked:
+            week_when = fmt_reset_moment(weekly.get("resets_at"), cfg["lang"])
+            if cfg["lang"] == "ru":
+                msg = (f"Сессия сброшена, но недельный лимит исчерпан — "
+                       f"работать нельзя до сброса недели ({week_when}).")
+                title = f"{APP_NAME} — недельный лимит исчерпан"
+            else:
+                msg = (f"Session reset, but the weekly limit is used up — "
+                       f"you cannot work until the week resets ({week_when}).")
+                title = f"{APP_NAME} — weekly limit used up"
+        elif cfg["lang"] == "ru":
             msg = f"{name} сброшена — лимит снова 100%. Следующий сброс через {cd} ({when})."
             title = f"{APP_NAME} — {self.tr(name_key)} сброшена"
         else:
@@ -1122,7 +1165,9 @@ class TrayApp:
             data = json.loads(proc.stdout)
             remote = str(data.get("version") or "")
             local = read_repo_version()
-            return remote if remote and remote != local else None
+            if remote and local and remote != local and is_newer_version(remote, local):
+                return remote
+            return None
         except Exception:
             logger.exception("Не удалось получить версию из репозитория")
             return None
@@ -1437,7 +1482,10 @@ class TrayApp:
             ring.create_oval(x0, y0, x0 + diameter, y0 + diameter,
                              outline=c["line"], width=thick)
             used = view["used"]
-            shown = self._display(used) if used is not None else None
+            week_used = view.get("week_used")
+            blocked = week_used is not None and float(week_used) >= 100
+            shown = ((0 if blocked else self._display(used))
+                     if used is not None else None)
             if used is None:
                 f_dash = tkfont.Font(family="Segoe UI", weight="bold",
                                      size=min(max(round(diameter / (5.5 * S)), 16), 40))
@@ -1445,7 +1493,8 @@ class TrayApp:
                 return
             ring.create_arc(x0, y0, x0 + diameter, y0 + diameter, start=90,
                             extent=-359.9 * (shown / 100.0), style="arc",
-                            width=thick, outline=color_for_used(used))
+                            width=thick,
+                            outline=(c["risk"] if blocked else color_for_used(used)))
 
             # Текст позиционируем по реальным метрикам шрифта, а не по долям
             # диаметра — иначе процент и подпись слипаются.
@@ -1569,12 +1618,20 @@ class TrayApp:
             s = d.get("s") if ok else None
 
             used = float(s["used"]) if s else None
-            if used != view["used"]:
+            weekly = d.get("w") if ok else None
+            week_used = float(weekly["used"]) if weekly else None
+            if used != view["used"] or week_used != view.get("week_used"):
                 view["used"] = used
+                view["week_used"] = week_used
                 draw_ring()
+            blocked = week_used is not None and week_used >= 100
             if s:
-                cap.config(text=f"{self.tr('session')} · {self.tr('reset')} "
-                                f"{fmt_countdown(s['resets_at'], lang)}")
+                if blocked:
+                    cap.config(text=f"{self.tr('blocked_weekly')} · "
+                                    f"{fmt_reset_moment(weekly.get('resets_at'), lang)}")
+                else:
+                    cap.config(text=f"{self.tr('session')} · {self.tr('reset')} "
+                                    f"{fmt_countdown(s['resets_at'], lang)}")
             else:
                 cap.config(text=self.tr("no_data") if not ok else "")
 

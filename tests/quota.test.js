@@ -250,3 +250,37 @@ test("normalizeWindow: разбирает usageDetails MCP по инструме
 test("normalizeWindow: без usageDetails поле details = null", () => {
   assert.equal(GLMQuota.normalizeWindow({ percentage: 5 }).details, null);
 });
+
+test("availability: исчерпанная неделя блокирует даже свежую сессию", () => {
+  const a = GLMQuota.availability({ utilization: 0 }, { utilization: 100 });
+  assert.equal(a.left, 0);
+  assert.equal(a.blocked, "weekly");
+  assert.equal(a.sessionLeft, 100, "окно 5ч действительно свободно");
+  assert.equal(a.weeklyLeft, 0);
+});
+
+test("availability: исчерпанная сессия — blocked=session", () => {
+  const a = GLMQuota.availability({ utilization: 100 }, { utilization: 40 });
+  assert.equal(a.left, 0);
+  assert.equal(a.blocked, "session");
+});
+
+test("availability: оба живы — берётся минимум", () => {
+  const a = GLMQuota.availability({ utilization: 20 }, { utilization: 60 });
+  assert.equal(a.left, 40, "min(80, 40)");
+  assert.equal(a.blocked, null);
+});
+
+test("availability: без данных — null, без блокировки", () => {
+  const a = GLMQuota.availability(null, null);
+  assert.equal(a.left, null);
+  assert.equal(a.blocked, null);
+});
+
+test("isNewerVersion: сравнивает по числам, а не строками", () => {
+  assert.equal(GLMQuota.isNewerVersion("0.7.20", "0.7.19"), true);
+  assert.equal(GLMQuota.isNewerVersion("0.7.19", "0.7.20"), false);
+  assert.equal(GLMQuota.isNewerVersion("0.7.20", "0.7.20"), false);
+  assert.equal(GLMQuota.isNewerVersion("1.0.0", "0.99.99"), true);
+  assert.equal(GLMQuota.isNewerVersion("0.10.0", "0.9.0"), true, "строка сравнила бы неверно");
+});

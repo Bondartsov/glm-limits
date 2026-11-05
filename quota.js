@@ -271,11 +271,49 @@ const GLMQuota = (() => {
     };
   }
 
+
+  // Реальная доступность: недельный лимит — верхний уровень и капит сессию.
+  // Если неделя исчерпана, работать нельзя даже при свежем окне 5 часов.
+  function availability(session, weekly) {
+    const sLeft = session && typeof session.utilization === "number"
+      ? Math.max(0, 100 - session.utilization) : null;
+    const wLeft = weekly && typeof weekly.utilization === "number"
+      ? Math.max(0, 100 - weekly.utilization) : null;
+    if (wLeft !== null && wLeft <= 0) {
+      return { left: 0, blocked: "weekly", sessionLeft: sLeft, weeklyLeft: wLeft };
+    }
+    if (sLeft !== null && sLeft <= 0) {
+      return { left: 0, blocked: "session", sessionLeft: sLeft, weeklyLeft: wLeft };
+    }
+    const candidates = [sLeft, wLeft].filter(v => v !== null);
+    return {
+      left: candidates.length ? Math.min(...candidates) : null,
+      blocked: null,
+      sessionLeft: sLeft,
+      weeklyLeft: wLeft,
+    };
+  }
+
+
+  // Сравнение версий: true, только если a НОВЕЕ b (0.7.20 > 0.7.19).
+  // Простое "!==" даёт ложные «доступна версия» при локальной сборке впереди.
+  function isNewerVersion(a, b) {
+    const pa = String(a || "").split(".").map((x) => parseInt(x, 10) || 0);
+    const pb = String(b || "").split(".").map((x) => parseInt(x, 10) || 0);
+    const len = Math.max(pa.length, pb.length);
+    for (let i = 0; i < len; i++) {
+      const x = pa[i] || 0;
+      const y = pb[i] || 0;
+      if (x !== y) return x > y;
+    }
+    return false;
+  }
+
   const api = {
     TOKEN_TYPES, MONTHLY_TYPE, NOTIFY_THRESHOLDS, BADGE_COLORS,
     toNumber, normalizeWindow, parseLimits, detectPlatform,
     badgeColor, badgeText, notifyDecision, formatAmount,
-    hourlyActivity, dailyActivity, activityWindow, parseModelUsage,
+    hourlyActivity, dailyActivity, activityWindow, parseModelUsage, availability, isNewerVersion,
   };
 
   if (typeof globalThis !== "undefined") globalThis.GLMQuota = api;

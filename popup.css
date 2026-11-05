@@ -15,6 +15,8 @@
   --hot: #C2854B;
   --risk: #C25F58;
   --track: #ECEEF0;
+  --risk-soft: rgba(194, 95, 88, .13);
+  --risk-line: rgba(194, 95, 88, .38);
   --shadow: 0 1px 2px rgba(23, 25, 28, .05);
   --shadow-lg: 0 12px 32px rgba(23, 25, 28, .12);
 }
@@ -32,6 +34,8 @@
   --hot: #CE9260;
   --risk: #CC6C64;
   --track: #24272B;
+  --risk-soft: rgba(204, 108, 100, .16);
+  --risk-line: rgba(204, 108, 100, .42);
   --shadow: 0 1px 2px rgba(0, 0, 0, .3);
   --shadow-lg: 0 12px 32px rgba(0, 0, 0, .5);
 }
@@ -319,4 +323,14 @@ body {
   font-family: ui-monospace, Consolas, monospace;
   font-size: 11px; line-height: 1.55; white-space: pre-wrap;
   color: var(--text); max-height: 220px; overflow-y: auto;
+}
+
+/* Штамп «недоступно» в карточке сессии */
+.card-flag {
+  display: inline-block; margin-top: 6px;
+  padding: 3px 9px; border-radius: 999px;
+  font-size: 11px; font-weight: 600;
+  color: var(--risk);
+  background: var(--risk-soft);
+  border: 1px solid var(--risk-line);
 }

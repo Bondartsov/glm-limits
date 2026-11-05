@@ -230,7 +230,8 @@ async function checkForUpdate(st) {
     if (!r.ok) return;
     const remote = await r.json();
     if (remote && remote.version && loaded &&
-        remote.version !== loaded.version && store.updNotified !== remote.version) {
+        GLMQuota.isNewerVersion(remote.version, loaded.version) &&
+        store.updNotified !== remote.version) {
       await chrome.storage.local.set({
         updNotified: remote.version,
         // Постоянная метка: она видна в попапе, а не только во всплывашке.
@@ -452,11 +453,11 @@ function humanizeError(e, lang) {
 // Срабатывает один раз на переход окна; первое наблюдение только запоминаем.
 async function maybeNotifyReset(st, fiveHour, sevenDay) {
   if (!st.notify) return;
-  await checkResetOne(st, "s", fiveHour);
-  await checkResetOne(st, "w", sevenDay);
+  await checkResetOne(st, "s", fiveHour, sevenDay);
+  await checkResetOne(st, "w", sevenDay, sevenDay);
 }
 
-async function checkResetOne(st, kind, win) {
+async function checkResetOne(st, kind, win, weekly) {
   if (!win || !win.resetsAt) return;
   const now = Date.now();
   const stg = await chrome.storage.local.get("resetState");
@@ -478,17 +479,28 @@ async function checkResetOne(st, kind, win) {
 
   const ru = st.lang === "ru";
   const name = kind === "s" ? (ru ? "Сессия" : "Session") : (ru ? "Неделя" : "Weekly");
+  // Недельный лимит — верхний уровень: при нуле «сброс сессии» не значит,
+  // что можно работать.
+  const weeklyExhausted = kind === "s" && weekly &&
+    typeof weekly.utilization === "number" && weekly.utilization >= 100;
   const next = formatReset(st.lang, win.resetsAt, "Следующий сброс через", "Next reset in");
   try {
     chrome.notifications.create({
       type: "basic",
       iconUrl: "icons/icon128.png",
       title: "GLM Limits — " + (kind === "s"
-        ? (ru ? "сессия сброшена" : "session reset")
+        ? (weeklyExhausted
+            ? (ru ? "недельный лимит исчерпан" : "weekly limit used up")
+            : (ru ? "сессия сброшена" : "session reset"))
         : (ru ? "неделя сброшена" : "weekly reset")),
-      message: ru
-        ? name + " сброшена — лимит снова 100%." + next
-        : name + " reset — limit is 100% again." + next,
+      message: weeklyExhausted
+        ? (ru
+            ? "Сессия сброшена, но недельный лимит исчерпан — работать нельзя до " +
+              formatReset(st.lang, weekly.resetsAt, "сброса недели", "the week resets")
+            : "Session reset, but the weekly limit is used up — you cannot work until " +
+              formatReset(st.lang, weekly.resetsAt, "the week resets", "the week resets"))
+        : (ru ? name + " сброшена — лимит снова 100%." + next
+              : name + " reset — limit is 100% again." + next),
     });
   } catch (e) {}
 }
@@ -509,9 +521,14 @@ async function updateBadge(st, fiveHour, sevenDay) {
       return;
     }
     const used = Math.max(0, Math.min(100, Math.round(win.utilization)));
+    // Недельный лимит — верхний уровень: при нуле доступно 0%, даже если
+    // окно 5 часов свежее.
+    const weeklyLeft = (sevenDay && typeof sevenDay.utilization === "number")
+      ? 100 - sevenDay.utilization : null;
+    const blockedByWeekly = weeklyLeft !== null && weeklyLeft <= 0;
     // valueMode: "remaining" (по умолчанию) — осталось, "used" — расход.
     // Цвет всегда по уровню расхода — опасность не зависит от формулировки.
-    const shown = st.valueMode === "used" ? used : 100 - used;
+    const shown = blockedByWeekly ? 0 : (st.valueMode === "used" ? used : 100 - used);
     await chrome.action.setBadgeBackgroundColor({ color: badgeColor(used) });
     try { await chrome.action.setBadgeTextColor({ color: "#ffffff" }); } catch (e) {}
     // "100" в бейдже Chrome обрезается — показываем "99+".
@@ -520,8 +537,13 @@ async function updateBadge(st, fiveHour, sevenDay) {
     const ru = st.lang === "ru";
     const kind = st.badgeMetric === "w" ? (ru ? "неделя" : "weekly") : (ru ? "сессия" : "session");
     const word = st.valueMode === "used" ? (ru ? "израсходовано" : "used") : (ru ? "осталось" : "left");
+    const blockedNote = blockedByWeekly
+      ? (ru ? " · недоступно: недельный лимит" : " · unavailable: weekly limit")
+      : "";
     try {
-      await chrome.action.setTitle({ title: "GLM Limits — " + kind + ": " + shown + "% " + word });
+      await chrome.action.setTitle({
+        title: "GLM Limits — " + kind + ": " + shown + "% " + word + blockedNote,
+      });
     } catch (e) {}
   } catch (e) {}
 }

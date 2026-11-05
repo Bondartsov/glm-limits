@@ -211,6 +211,36 @@ class TestNotifications(unittest.TestCase):
         self.assertEqual(len(msgs), 1, "должно быть одно уведомление о сбросе")
         self.assertIn("Следующий сброс через", msgs[0][1])
 
+
+    def test_tooltip_reports_weekly_block(self):
+        app = tray.TrayApp()
+        app.current_cfg = dict(app.current_cfg, lang="ru")
+        future = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+        week = (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()
+        app.state.set({"ok": True, "s": {"used": 0, "resets_at": future},
+                       "w": {"used": 100, "resets_at": week}, "ts": 0})
+        tip = app.tooltip()
+        self.assertIn("Недоступно", tip)
+        self.assertIn("недельный лимит", tip.lower())
+
+    def test_reset_message_when_weekly_exhausted(self):
+        app = tray.TrayApp()
+        app.icon = FakeIcon()
+        cfg = {"notify": True, "lang": "ru"}
+        past = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        future = (datetime.now(timezone.utc) + timedelta(hours=4)).isoformat()
+        week = (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()
+
+        # первое наблюдение — запоминаем
+        app.check_notifications(cfg, {"s": {"used": 3, "resets_at": past},
+                                      "w": {"used": 100, "resets_at": week}})
+        # сессия сбросилась, неделя исчерпана
+        app.check_notifications(cfg, {"s": {"used": 1, "resets_at": future},
+                                      "w": {"used": 100, "resets_at": week}})
+        msgs = [m for m in app.icon.messages if "недельный лимит исчерпан" in m[1]]
+        self.assertEqual(len(msgs), 1, [m[1] for m in app.icon.messages])
+        self.assertIn("работать нельзя", msgs[0][1])
+
     def test_disabled_notifications(self):
         app = tray.TrayApp()
         app.icon = FakeIcon()
@@ -350,6 +380,18 @@ class TestHumanError(unittest.TestCase):
 
     def test_unknown_passthrough(self):
         self.assertEqual(tray.human_error(Exception("boom"), "ru"), "boom")
+
+
+
+class TestVersionCompare(unittest.TestCase):
+    def test_newer(self):
+        self.assertTrue(tray.is_newer_version("0.7.20", "0.7.19"))
+        self.assertTrue(tray.is_newer_version("0.10.0", "0.9.0"))
+
+    def test_not_newer(self):
+        self.assertFalse(tray.is_newer_version("0.7.19", "0.7.20"))
+        self.assertFalse(tray.is_newer_version("0.7.20", "0.7.20"))
+        self.assertFalse(tray.is_newer_version("", "0.7.20"))
 
 
 @unittest.skipUnless(sys.platform == "win32", "DPAPI доступен только на Windows")
