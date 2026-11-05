@@ -41,3 +41,23 @@ test("manifest: разрешения и хосты на месте", () => {
   assert.ok(manifest.host_permissions.includes("https://raw.githubusercontent.com/*"),
     "нужен доступ к raw.githubusercontent.com для проверки обновлений");
 });
+
+test("в папке расширения нет файлов/каталогов с именем на «_»", () => {
+  // Chrome/Яндекс отказываются загружать расширение: «Filenames starting
+  // with _ are reserved for use by the system». Ловим это до браузера.
+  const skip = new Set([".git", ".github", "node_modules"]);
+  const offenders = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.name.startsWith("_")) {
+        offenders.push(path.relative(ROOT, full));
+        continue;
+      }
+      if (entry.isDirectory() && !skip.has(entry.name)) walk(full);
+    }
+  };
+  walk(ROOT);
+  assert.deepEqual(offenders, [],
+    "эти имена не дадут загрузить расширение: " + offenders.join(", "));
+});
