@@ -79,6 +79,24 @@ except Exception as exc:  # noqa: BLE001 — ловим всё, чтобы за�
     except OSError:
         pass
 
+# Флаг CREATE_NO_WINDOW: без него каждый git.exe из pythonw-процесса
+# открывает своё консольное окно — на экране мелькает чёрный прямоугольник.
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
+def run_hidden(args: list[str], timeout: float = 15) -> subprocess.CompletedProcess:
+    """subprocess.run без окна консоли (git.exe иначе мелькает на экране)."""
+    return subprocess.run(
+        args,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        encoding="utf-8",
+        errors="replace",
+        creationflags=_NO_WINDOW,
+    )
+
+
 # Пороги уведомлений о расходе сессии (по возрастанию) — по одному уведомлению
 # на порог в пределах одного окна сброса.
 NOTIFY_THRESHOLDS = (80, 90, 100)
@@ -980,10 +998,9 @@ class TrayApp:
         lang = self.current_cfg["lang"]
         try:
             before = self._git_head()
-            proc = subprocess.run(
+            proc = run_hidden(
                 ["git", "-C", str(REPO_DIR), "pull", "--ff-only", "origin", "main"],
-                capture_output=True, text=True, timeout=120,
-                encoding="utf-8", errors="replace",
+                timeout=120,
             )
             out = (proc.stdout or "") + (proc.stderr or "")
             logger.info("git pull: %s", out.strip()[:300])
@@ -1092,15 +1109,13 @@ class TrayApp:
     def _fetch_remote_version() -> str | None:
         """Версия в origin/main, если она новее локальной."""
         try:
-            subprocess.run(
+            run_hidden(
                 ["git", "-C", str(REPO_DIR), "fetch", "--quiet", "origin", "main"],
-                capture_output=True, text=True, timeout=60,
-                encoding="utf-8", errors="replace",
+                timeout=60,
             )
-            proc = subprocess.run(
+            proc = run_hidden(
                 ["git", "-C", str(REPO_DIR), "show", "origin/main:manifest.json"],
-                capture_output=True, text=True, timeout=15,
-                encoding="utf-8", errors="replace",
+                timeout=15,
             )
             if proc.returncode != 0:
                 return None
@@ -1119,10 +1134,9 @@ class TrayApp:
     @staticmethod
     def _git_head() -> str | None:
         try:
-            proc = subprocess.run(
+            proc = run_hidden(
                 ["git", "-C", str(REPO_DIR), "rev-parse", "HEAD"],
-                capture_output=True, text=True, timeout=15,
-                encoding="utf-8", errors="replace",
+                timeout=15,
             )
             return proc.stdout.strip() if proc.returncode == 0 else None
         except Exception:
@@ -1135,10 +1149,9 @@ class TrayApp:
         if not before or not after:
             return False
         try:
-            proc = subprocess.run(
+            proc = run_hidden(
                 ["git", "-C", str(REPO_DIR), "diff", "--name-only", before, after],
-                capture_output=True, text=True, timeout=15,
-                encoding="utf-8", errors="replace",
+                timeout=15,
             )
             if proc.returncode != 0:
                 return False
