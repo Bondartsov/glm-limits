@@ -12,3 +12,8 @@ tray/tray_app.log
 tray/tray_crash.log
 __pycache__/
 *.pyc
+
+# Временные файлы разработки
+_patch*.py
+.tmp*/
+.playwright-mcp/

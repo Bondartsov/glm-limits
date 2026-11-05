@@ -73,10 +73,9 @@
           <span class="pct" id="sessionPct">—</span><span class="pct-unit">%</span>
         </div>
         <div class="bar-track"><div class="bar-fill" id="sessionBar"></div></div>
-        <svg class="chart" id="sessionChart" viewBox="0 0 328 48" style="display:none"></svg>
+        <svg class="chart" id="sessionChart" viewBox="0 0 328 38" style="display:none"></svg>
         <div class="chart-legend" id="sessionLegend"></div>
         <div class="card-foot">
-          <span class="card-hint" data-i18n="chartHours">активность по часам</span>
           <span class="card-when" id="sessionReset"></span>
         </div>
       </section>
@@ -92,11 +91,8 @@
           <span class="mini-track"><span class="mini-fill" id="weeklyBar"></span></span>
           <span class="line-when" id="weeklyReset"></span>
         </div>
-        <svg class="chart chart-week" id="weeklyChart" viewBox="0 0 328 36" style="display:none"></svg>
+        <svg class="chart chart-week" id="weeklyChart" viewBox="0 0 328 30" style="display:none"></svg>
         <div class="chart-legend" id="weeklyLegend"></div>
-        <div class="card-foot">
-          <span class="card-hint" data-i18n="chartDays">расход по дням недели</span>
-        </div>
       </section>
 
       <!-- MCP -->
@@ -115,19 +111,18 @@
 
       <!-- Расход по моделям -->
       <section class="card optional" id="metricModels" style="display:none">
-        <div class="card-head">
+        <div class="card-head models-head" id="modelsHead">
           <span class="card-label" data-i18n="modelsTitle">Расход по моделям</span>
           <span class="card-anno" id="modelsAnno"></span>
         </div>
-        <div class="share-bar" id="modelsBar"></div>
-        <div class="model-rows" id="modelsRows"></div>
-        <div class="card-foot">
-          <span class="card-hint" data-i18n="modelsHint">токены за сегодня</span>
+        <div id="modelsBody" style="display:none">
+          <div class="share-bar" id="modelsBar"></div>
+          <div class="model-rows" id="modelsRows"></div>
+          <div class="card-foot">
+            <span class="card-hint" data-i18n="modelsHint">токены за сегодня</span>
+          </div>
         </div>
       </section>
-
-      <!-- Plan badge -->
-      <div class="plan-badge" id="planBadge"></div>
 
       <!-- Compact view -->
       <div class="compact-view" id="compactView" style="display:none">

@@ -143,6 +143,7 @@ let lastUpdateInfo = null;      // кэш lastUpdate — читаем из stora
 let updateAvailableInfo = null; // метка «доступна новая версия» (постоянная)
 let lastChartHour = null;       // час, для которого нарисована скользящая шкала
 let modelUsageData = null;      // расход по моделям (токены за сегодня)
+let modelsOpen = false;         // карточка моделей свёрнута по умолчанию
 
 // ── Helpers ──────────────────────────────────────────────
 function t(key) {
@@ -523,7 +524,9 @@ function renderModels(mu) {
     addRow(t("modelsOther").replace("{n}", rest.length), "var(--muted)",
       restTotal, restShare);
   }
-  $("modelsAnno").textContent = GLMQuota.formatAmount(mu.total, currentLang);
+  const totalTxt = GLMQuota.formatAmount(mu.total, currentLang);
+  $("modelsAnno").textContent = totalTxt + (modelsOpen ? " ▾" : " ▸");
+  $("modelsBody").style.display = modelsOpen ? "" : "none";
 }
 // ── Рендеринг ─────────────────────────────────────────────
 function setStatus(kind, text, extra) {
@@ -635,7 +638,6 @@ function showEmptyState() {
   $("metricWeekly").style.display = "none";
   $("metricMcp").style.display = "none";
   $("metricModels").style.display = "none";
-  $("planBadge").style.display = "none";
   $("footer").style.display = "none";
   $("sessionFlag").style.display = "none";
   setStatus("offline", t("statusNoKey"));
@@ -659,15 +661,17 @@ function render(data) {
     $("metricWeekly").style.display = "none";
     $("metricMcp").style.display = "none";
     $("metricModels").style.display = "none";
-    $("planBadge").style.display = "none";
-    $("footer").style.display = "none";
+      $("footer").style.display = "none";
     $("sessionFlag").style.display = "none";
     return;
   }
 
-  setStatus("online", t("statusOnline"), (updateAvailableInfo
-    ? "↑ " + t("updateAvailable").replace("{v}", updateAvailableInfo.version)
-    : ""));
+  const extraParts = [];
+  if (updateAvailableInfo) {
+    extraParts.push("↑ " + t("updateAvailable").replace("{v}", updateAvailableInfo.version));
+  }
+  if (data.plan) extraParts.push(t("plan") + ": " + data.plan);
+  setStatus("online", t("statusOnline"), extraParts.join(" · "));
   $("loading").style.display = "none";
 
   const viewMode = normalizeViewMode(currentSettings.viewMode);
@@ -680,8 +684,7 @@ function render(data) {
     $("metricWeekly").style.display = "none";
     $("metricMcp").style.display = "none";
     $("metricModels").style.display = "none";
-    $("planBadge").style.display = "none";
-    $("compactView").style.display = "";
+      $("compactView").style.display = "";
     showChip("chipSession", "chipSessionPct", data.s);
     showChip("chipWeekly", "chipWeeklyPct", data.w);
     if (avail.blocked === "weekly") {
@@ -728,25 +731,19 @@ function render(data) {
   } else {
     $("metricMcp").style.display = "none";
   }
-  if (data.plan) {
-    $("planBadge").textContent = t("plan") + ": " + data.plan;
-    $("planBadge").style.display = "";
-  } else {
-    $("planBadge").style.display = "none";
-  }
 
   // Активность сессии — скользящее окно часов вокруг «сейчас» (3 ч назад
   // и 3 ч вперёд), с отметками «сейчас» и границ сброса окна.
   const sWin = sessionWindow();
   renderTimeChart($("sessionChart"), sWin.bars,
     sWin.bars.map((b) => String(b.hour).padStart(2, "0")),
-    { barH: 30, nowIndex: sWin.before, resets: sWin.resets });
+    { barH: 20, nowIndex: sWin.before, resets: sWin.resets });
 
   // Расход недельного окна по дням недели (Пн..Вс): отметки «сегодня»
   // и дня сброса недели.
   const wWin = weeklyWindow();
   renderTimeChart($("weeklyChart"), wWin.bars, wWin.labels,
-    { barH: 18, nowIndex: wWin.nowIndex, resets: wWin.resets });
+    { barH: 12, nowIndex: wWin.nowIndex, resets: wWin.resets });
 
   updateChartLegends();
   renderModels(modelUsageData);
@@ -1044,6 +1041,13 @@ async function runTrayUpdate() {
 }
 
 // ── Переключатели ─────────────────────────────────────────
+function toggleModels() {
+  modelsOpen = !modelsOpen;
+  const body = $("modelsBody");
+  if (body) body.style.display = modelsOpen ? "" : "none";
+  if (modelUsageData) renderModels(modelUsageData);
+}
+
 function toggleCompact() {
   const next = currentSettings.viewMode === "compact" ? "popup" : "compact";
   $("viewModeSelect").value = next;
@@ -1146,7 +1150,7 @@ function tickUpdate() {
     const sWin = sessionWindow();
     renderTimeChart($("sessionChart"), sWin.bars,
       sWin.bars.map((b) => String(b.hour).padStart(2, "0")),
-      { barH: 30, nowIndex: sWin.before, resets: sWin.resets });
+      { barH: 20, nowIndex: sWin.before, resets: sWin.resets });
   }
 }
 
@@ -1176,6 +1180,7 @@ async function init() {
   $("saveSettings").addEventListener("click", saveSettings);
   $("resetSettings").addEventListener("click", resetSettings);
   $("badgeCheck").addEventListener("change", updateBadgeField);
+  $("modelsHead").addEventListener("click", toggleModels);
   $("runDiag").addEventListener("click", runDiagnostics);
   $("autoUpdateCheck").addEventListener("change", (e) => setTrayAutoUpdate(e.target.checked));
   $("trayUpdateNow").addEventListener("click", runTrayUpdate);

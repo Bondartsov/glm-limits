@@ -1683,7 +1683,8 @@ class TrayApp:
         ring.bind("<Configure>", lambda event: draw_ring())
 
         # ── Подпись ──
-        cap = tk.Label(win, text="", font=("Segoe UI", 10), fg=c["muted"], bg=c["bg"])
+        cap = tk.Label(win, text="", font=("Segoe UI", 10), fg=c["muted"], bg=c["bg"],
+                       justify="center")
         cap.grid(row=3, column=0, sticky="ew", padx=px(16), pady=(px(6), 0))
 
         # ── Мини-график: высота считается из метрик шрифта подписей ──
@@ -1753,7 +1754,7 @@ class TrayApp:
         make_row(7, "mcp", self.tr("mcp"))
 
         models_lbl = tk.Label(win, text="", font=("Segoe UI", 9), fg=c["muted"],
-                              bg=c["bg"], anchor="w")
+                              bg=c["bg"], anchor="w", justify="left")
         models_lbl.grid(row=8, column=0, sticky="ew", padx=px(16), pady=(px(6), 0))
 
         # ── Подвал ──
@@ -1787,6 +1788,11 @@ class TrayApp:
                 view["week_used"] = week_used
                 draw_ring()
             blocked = week_used is not None and week_used >= 100
+            # Длинные подписи переносим по ширине окна, а не обрезаем.
+            try:
+                cap.configure(wraplength=max(180, win.winfo_width() - px(32)))
+            except Exception:
+                pass
             if s:
                 if blocked:
                     cap.config(text=f"{self.tr('blocked_weekly')} · "
@@ -1808,6 +1814,10 @@ class TrayApp:
 
             draw_chart()
             mu = self._model_usage
+            try:
+                models_lbl.configure(wraplength=max(180, win.winfo_width() - px(32)))
+            except Exception:
+                pass
             if mu and mu.get("models"):
                 parts = [f"{m['name']} {round(m['share'] * 100)}%"
                          for m in mu["models"][:3]]
